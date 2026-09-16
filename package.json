@@ -1,0 +1,11 @@
+{
+  "name": "open-plugin",
+  "version": "0.0.0",
+  "description": "Install, diagnose and update agent plugins (Agent Plugins spec) and MCP configs across Claude Code, Codex, Cursor, Kimi and more",
+  "license": "MIT",
+  "type": "module",
+  "repository": { "type": "git", "url": "git+https://github.com/archeism/open-plugin.git" },
+  "bin": { "open-plugin": "./bin/open-plugin.mjs" },
+  "scripts": { "test": "bun test", "check": "tsc --noEmit" },
+  "files": ["bin", "dist", "README.md", "LICENSE"]
+}
