@@ -217,7 +217,7 @@ describe('doctor · CLI', () => {
   });
 
   test('stubbed verbs exit 2', () => {
-    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'add', 'owner/repo'], {
+    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'pin'], {
       encoding: 'utf8',
       env: { ...process.env, OPEN_PLUGIN_HOME: '/nonexistent-open-plugin-home' },
     });

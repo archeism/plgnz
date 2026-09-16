@@ -63,9 +63,12 @@ export interface HostReader {
 
 export interface AddOptions {
   target?: string;
+  dryRun?: boolean;
 }
 
+import type { PluginSource, ResolvedSource } from './source';
+
 export interface HostWriter extends HostReader {
-  add(source: string, opts?: AddOptions): Promise<void>;
+  add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void>;
   remove(id: string): Promise<void>;
 }

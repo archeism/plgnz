@@ -17,7 +17,8 @@
  *   ]
  * }
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { stateFile } from './paths';
 
 export interface InstallRecord {
@@ -67,4 +68,11 @@ export function readState(file: string = stateFile()): InstallRecord[] {
 /** Find the ledger row for one install on one host. */
 export function findRecord(records: InstallRecord[], host: string, id: string): InstallRecord | undefined {
   return records.find((r) => r.host === host && r.id === id);
+}
+
+export function writeState(records: InstallRecord[], file: string = stateFile()): void {
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ version: 1, installs: records }, null, 2));
+  } catch {}
 }

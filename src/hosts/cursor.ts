@@ -13,7 +13,7 @@
  * commands cannot be assumed to resolve (spec §7.2.1) — doctor flags them and
  * `pin` rewrites them to absolute paths.
  */
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
 import { cursorRoot } from '../paths';
@@ -74,4 +74,79 @@ export const cursor: HostReader = {
     }
     return entries;
   },
+};
+
+import type { HostWriter, AddOptions } from '../host';
+import type { PluginSource, ResolvedSource } from '../source';
+import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import * as fs from 'node:fs';
+import { which, resolveCommandPath } from '../exec';
+
+export const cursorWriter: HostWriter = {
+  ...cursor,
+  async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void> {
+    const id = plugin.name;
+    const targetDir = join(localDir(), id);
+
+    if (opts?.dryRun) {
+      console.log(`[cursor] would write directory: ${targetDir}`);
+      return;
+    }
+
+    if (existsSync(targetDir)) {
+      (fs as any).rmSync(targetDir, { recursive: true, force: true });
+    }
+    mkdirSync(targetDir, { recursive: true });
+    cpSync(plugin.dir, targetDir, { recursive: true });
+
+    const pluginJson = join(targetDir, '.plugin', 'plugin.json');
+    const rootPluginJson = join(targetDir, 'plugin.json');
+    const sourceManifest = existsSync(pluginJson) ? pluginJson : existsSync(rootPluginJson) ? rootPluginJson : null;
+    
+    const cursorPluginDir = join(targetDir, '.cursor-plugin');
+    const cursorPluginJson = join(cursorPluginDir, 'plugin.json');
+    
+    if (sourceManifest && !existsSync(cursorPluginJson)) {
+      mkdirSync(cursorPluginDir, { recursive: true });
+      cpSync(sourceManifest, cursorPluginJson);
+    }
+
+    const pinMcp = (file: string) => {
+      const p = join(targetDir, file);
+      if (!existsSync(p)) return;
+      try {
+        const data = JSON.parse(readFileSync(p, 'utf8'));
+        if (data && data.mcpServers) {
+          let changed = false;
+          for (const key in data.mcpServers) {
+            const srv = data.mcpServers[key];
+            if (srv && srv.type === 'stdio' && typeof srv.command === 'string') {
+              const cmd = srv.command;
+              let abs = cmd;
+              if (cmd.includes('/')) {
+                abs = resolveCommandPath(cmd, targetDir);
+              } else {
+                const w = which(cmd);
+                if (w) abs = w;
+              }
+              if (abs !== cmd) {
+                srv.command = abs;
+                changed = true;
+              }
+            }
+          }
+          if (changed) writeFileSync(p, JSON.stringify(data, null, 2));
+        }
+      } catch {}
+    };
+
+    pinMcp('mcp.json');
+    pinMcp('.mcp.json');
+  },
+  async remove(id: string): Promise<void> {
+    const targetDir = join(localDir(), id);
+    if (existsSync(targetDir)) {
+      (fs as any).rmSync(targetDir, { recursive: true, force: true });
+    }
+  }
 };
