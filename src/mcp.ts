@@ -15,12 +15,29 @@
  * Measured on this machine, `npx plugins add` dereferences one source into
  * *all* of these per install dir, so the same server usually appears 2–3×;
  * identical restatements are deduped, keeping the highest-priority occurrence.
+ *
+ * The write side is `pinPluginMcpFiles` — the per-host `pin` implementations
+ * share it so the file list they rewrite is the same list they read.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { McpServerEntry } from './host';
+import type { McpServerEntry, PinChange, PinOptions, PinOutcome, PinRefusal } from './host';
+import { which } from './exec';
 
 export type RawServerDef = Record<string, unknown>;
+
+/**
+ * One place a plugin may declare MCP servers, in the host's own priority
+ * order: a spec `mcp.json`/`.mcp.json` at the plugin root, or a host-native
+ * manifest whose `mcpServers` member is either inline servers or (codex-style)
+ * a pointer string at a spec file.
+ */
+export type PluginMcpCandidate = { kind: 'spec'; file: string } | { kind: 'inline'; manifest: string };
+
+/** The file a candidate names, relative to the plugin root. */
+function candidateFile(pluginDir: string, candidate: PluginMcpCandidate): string {
+  return candidate.kind === 'spec' ? join(pluginDir, candidate.file) : join(pluginDir, candidate.manifest);
+}
 
 export function readJson(file: string): Record<string, unknown> | null {
   try {
@@ -78,7 +95,7 @@ export function normalizeTransport(def: RawServerDef): 'stdio' | 'http' | null {
 export function collectPluginServers(
   pluginId: string,
   pluginDir: string,
-  candidates: Array<{ kind: 'spec'; file: string } | { kind: 'inline'; manifest: string }>,
+  candidates: readonly PluginMcpCandidate[],
 ): McpServerEntry[] {
   const entries: McpServerEntry[] = [];
   const seen = new Set<string>();
@@ -126,6 +143,68 @@ export function collectPluginServers(
     }
   }
   return entries;
+}
+
+/**
+ * Rewrite bare stdio `command`s in one plugin copy to the absolute path they
+ * resolve to on this process's PATH — the write side of `pin`, shared by every
+ * host so the files it rewrites are exactly the `candidates` it reads.
+ *
+ * Per spec §7.2.1 a `command` is a single executable token, either bare or a
+ * plugin-relative path starting with `./`; only the bare form is rewritten
+ * here (a `./`-relative or absolute command is already unambiguous). A bare
+ * command that does not resolve is never invented: it is returned as a refusal
+ * and the file is left as-is.
+ *
+ * A codex-style pointer manifest (`"mcpServers": "./.mcp.json"`) is not an
+ * object, so it is skipped here — the file it points at is a spec candidate of
+ * its own and gets pinned directly.
+ */
+export function pinPluginMcpFiles(
+  pluginDir: string,
+  candidates: readonly PluginMcpCandidate[],
+  opts: PinOptions = {},
+): PinOutcome {
+  const changes: PinChange[] = [];
+  const refusals: PinRefusal[] = [];
+  // One server is usually restated across 2–3 files; report each name once
+  // (the twins are still rewritten below) so findings and recorded pins don't
+  // repeat per file.
+  const reported = new Set<string>();
+  for (const candidate of candidates) {
+    const file = candidateFile(pluginDir, candidate);
+    const root = readJson(file);
+    if (root === null) continue;
+    const servers = root['mcpServers'];
+    if (typeof servers !== 'object' || servers === null || Array.isArray(servers)) continue;
+    let rewritten = false;
+    for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {
+      if (opts.only !== undefined && !opts.only.includes(name)) continue;
+      if (typeof value !== 'object' || value === null) continue;
+      const def = value as RawServerDef;
+      if (normalizeTransport(def) !== 'stdio') continue;
+      const command = def['command'];
+      if (typeof command !== 'string' || command.length === 0 || command.includes('/')) continue;
+      const resolved = which(command);
+      if (resolved === null) {
+        if (!reported.has(name)) {
+          reported.add(name);
+          refusals.push({ server: name, command, file });
+        }
+        continue;
+      }
+      if (!reported.has(name)) {
+        reported.add(name);
+        changes.push({ server: name, from: command, to: resolved, file });
+      }
+      if (command !== resolved) {
+        def['command'] = resolved;
+        rewritten = true;
+      }
+    }
+    if (rewritten && opts.dryRun !== true) writeFileSync(file, JSON.stringify(root, null, 2));
+  }
+  return { changes, refusals };
 }
 
 /** Collect entries from a host-level config file (`mcpServers` object shape). */

@@ -30,13 +30,22 @@ plus `.cursor-plugin/plugin.json` (omas issue #284).
   distinguishable from evidence; reading both covers either.
 - **GUI host**: `launchctl getenv PATH` is unset, so a bare command cannot be
   assumed to resolve (spec §7.2.1 makes PATH participation client-defined).
-  Doctor flags bare commands `!` with `run open-plugin pin`; `pin` (later
-  phase) rewrites them to absolute paths.
+  Doctor flags bare commands `!` with `run open-plugin pin`; `pin` rewrites
+  them to absolute paths.
 - **Shadow semantics (measured)**: a user-level entry and a plugin server of
   the same name both load and duplicate (Cursor runs the plugin one as
   `plugin-<plugin>-<server>`); doctor reports ✗ with "both load and duplicate".
 - Native commands may use `${CURSOR_PLUGIN_ROOT}` (measured:
   `plugins/local/alp/.mcp.json`); doctor expands it against the plugin root.
+
+## Pin
+
+Cursor is the default `pin` target (`gui: true`). `pin()` rewrites the bare
+`command` of every stdio server in each plugin copy's `mcp.json` *and*
+`.mcp.json` — both files, because both carry the server and whichever one
+Cursor launches is not distinguishable from the evidence. `~/.cursor/mcp.json`
+is a user-level file and is never touched. Rationale and refusal rules:
+`docs/pin-and-update.md`.
 
 ## Evidence paths (read 2026-09-16)
 

@@ -1,13 +1,14 @@
 /**
- * CLI entrypoint. Verbs: add, doctor, pin, update, list, remove, targets.
- * This phase implements `doctor`; the rest are stubs that print
- * `not implemented` and exit 2 (AGENTS.md verbs list).
+ * CLI entrypoint. Verbs: add, doctor, pin, update, list, remove, targets
+ * (AGENTS.md verbs list).
  */
-import { runDoctor, formatFinding } from './doctor';
+import { runDoctor, formatFinding, type DoctorFinding } from './doctor';
 import { hosts, writers } from './hosts';
 import { resolveSource } from './source';
 import { readState, writeState } from './state';
 import type { InstallRecord } from './state';
+import { runPin } from './pin';
+import { runUpdate } from './update';
 
 const USAGE = `open-plugin — install, diagnose and update agent plugins and MCP configs
 
@@ -16,21 +17,56 @@ usage: open-plugin <verb> [options]
 verbs:
   add <source> [--target <host>…]   install a plugin into each host's native store
   doctor [--json]                   dead commands, shadowed entries, stale installs (read-only)
-  pin                               rewrite bare commands to absolute paths for GUI hosts
-  update                            idempotent re-add; re-materialize copy-based hosts
+  pin [--target <host>] [--all]     rewrite bare commands to absolute paths for GUI hosts
+                                    (default targets: the GUI hosts; --all for every host)
+  update [name] [--dry-run]         idempotent re-add from state.json; re-materializes
+                                    copy-based hosts and re-applies recorded pins
   list                              list installed plugins per host
   remove <plugin>                   remove an installed plugin
   targets                           list detected agent hosts
 `;
 
-const STUBBED = new Set(['pin', 'update']);
+/** Flags shared by `pin` and `update`. */
+interface VerbFlags {
+  positionals: string[];
+  targets: string[];
+  all: boolean;
+  dryRun: boolean;
+}
+
+function parseFlags(args: string[]): VerbFlags {
+  const flags: VerbFlags = { positionals: [], targets: [], all: false, dryRun: false };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--target' || arg === '-t') {
+      const value = args[i + 1];
+      if (value !== undefined) {
+        flags.targets.push(value);
+        i++;
+      }
+    } else if (arg === '--all') {
+      flags.all = true;
+    } else if (arg === '--dry-run') {
+      flags.dryRun = true;
+    } else if (arg !== undefined) {
+      flags.positionals.push(arg);
+    }
+  }
+  return flags;
+}
+
+/** Findings print the same way doctor's do: `<host>  <mark>  <message>`. */
+function printFindings(findings: readonly DoctorFinding[], json: boolean): void {
+  if (json) console.log(JSON.stringify(findings, null, 2));
+  else for (const f of findings) console.log(formatFinding(f));
+}
 
 function fail(message: string, code: number): never {
   console.error(message);
   process.exit(code);
 }
 
-export function main(argv: string[]): number {
+export async function main(argv: string[]): Promise<number> {
   const args = argv.filter((a) => a !== '--json');
   const json = argv.length !== args.length;
   const verb = args[0];
@@ -76,65 +112,80 @@ export function main(argv: string[]): number {
     const target = args[1];
     if (!target) fail(`open-plugin remove: missing plugin id`, 2);
     let state = readState();
-    let promises = [];
     for (const w of writers) {
       if (!w.detect()) continue;
-      promises.push(w.remove(target));
+      await w.remove(target);
     }
-    Promise.all(promises).then(() => {
-      // remove from state
-      state = state.filter(r => r.id !== target);
-      writeState(state);
-    }).catch(e => fail(e.message, 1));
+    state = state.filter(r => r.id !== target);
+    writeState(state);
     return 0;
   }
   if (verb === 'add') {
-    const sourceStr = args[1];
-    if (!sourceStr) fail(`open-plugin add: missing source`, 2);
-    const targetFlags = argv.filter((a, i) => argv[i-1] === '--target' || argv[i-1] === '-t');
-    
-    // We should parse CLI in a simple way for the phase
-    const dryRun = argv.includes('--dry-run');
-    
-    // Run async inside sync function
-    (async () => {
-      try {
-        const resolved = resolveSource(sourceStr);
-        let state = readState();
-        for (const w of writers) {
-          if (!w.detect()) continue;
-          if (targetFlags.length > 0 && !targetFlags.includes(w.id)) continue;
-          for (const plugin of resolved.plugins) {
-            await w.add(plugin, resolved, { dryRun });
-            if (!dryRun) {
-              const id = plugin.marketplace ? `${plugin.name}@${plugin.marketplace}` : plugin.name;
-              const idx = state.findIndex(r => r.host === w.id && r.id === id);
-              const rec: InstallRecord = {
-                host: w.id,
-                id,
-                source: resolved.sourceUri,
-                sourceSha: resolved.sha,
-                installedAt: new Date().toISOString()
-              };
-              if (idx !== -1) state[idx] = rec;
-              else state.push(rec);
-            }
+    const flags = parseFlags(args.slice(1));
+    if (flags.positionals.length > 1) fail(`open-plugin add: unexpected argument: ${flags.positionals[1]}`, 2);
+    const sourceArg = flags.positionals[0];
+    if (sourceArg === undefined) fail(`open-plugin add: missing source`, 2);
+
+    try {
+      const resolved = resolveSource(sourceArg);
+      let state = readState();
+      for (const w of writers) {
+        if (!w.detect()) continue;
+        if (flags.targets.length > 0 && !flags.targets.includes(w.id)) continue;
+        for (const plugin of resolved.plugins) {
+          await w.add(plugin, resolved, { dryRun: flags.dryRun });
+          if (!flags.dryRun) {
+            const id = plugin.marketplace ? `${plugin.name}@${plugin.marketplace}` : plugin.name;
+            const idx = state.findIndex(r => r.host === w.id && r.id === id);
+            const previous = idx !== -1 ? state[idx] : undefined;
+            const rec: InstallRecord = {
+              host: w.id,
+              id,
+              source: resolved.sourceUri,
+              sourceSha: resolved.sha,
+              installedAt: new Date().toISOString()
+            };
+            // Pins carry over a re-add: the fresh copy is bare again, so the
+            // record keeps saying which servers this install wants pinned and
+            // `update` re-applies them.
+            if (previous?.pins !== undefined) rec.pins = previous.pins;
+            if (idx !== -1) state[idx] = rec;
+            else state.push(rec);
           }
         }
-        if (!dryRun) writeState(state);
-      } catch(e: any) {
-        fail(e.message, 1);
       }
-    })();
+      if (!flags.dryRun) writeState(state);
+    } catch (e: any) {
+      fail(e.message, 1);
+    }
     return 0;
   }
-  
-  if (STUBBED.has(verb)) {
-    fail(`open-plugin ${verb}: not implemented`, 2);
+  if (verb === 'pin') {
+    const flags = parseFlags(args.slice(1));
+    if (flags.positionals.length > 0) fail(`open-plugin pin: unexpected argument: ${flags.positionals[0]}`, 2);
+    const known = new Set(writers.map((w) => w.id));
+    for (const target of flags.targets) {
+      if (!known.has(target)) {
+        fail(`open-plugin pin: unknown target '${target}' (known: ${[...known].join(', ')})`, 2);
+      }
+    }
+    const result = await runPin({ targets: flags.targets, all: flags.all, dryRun: flags.dryRun });
+    printFindings(result.findings, json);
+    return result.exitCode;
   }
+  if (verb === 'update') {
+    const flags = parseFlags(args.slice(1));
+    if (flags.positionals.length > 1) fail(`open-plugin update: unexpected argument: ${flags.positionals[1]}`, 2);
+    const result = await runUpdate(flags.positionals[0], { dryRun: flags.dryRun });
+    printFindings(result.findings, json);
+    return result.exitCode;
+  }
+
   fail(`open-plugin: unknown verb '${verb}'\n\n${USAGE}`, 2);
 }
 
 if (process.argv[1] !== undefined && process.argv[1].endsWith('cli.ts')) {
-  process.exitCode = main(process.argv.slice(2));
+  void main(process.argv.slice(2)).then((code) => {
+    process.exitCode = code;
+  });
 }

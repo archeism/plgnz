@@ -17,12 +17,24 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
+import type { HostReader, InstalledPlugin, McpServerEntry, PinOptions, PinOutcome } from '../host';
 import { kimiRoot } from '../paths';
-import { collectPluginServers, readJson, type RawServerDef } from '../mcp';
+import { collectPluginServers, pinPluginMcpFiles, readJson, type PluginMcpCandidate, type RawServerDef } from '../mcp';
 
 function pluginsDir(): string {
   return join(kimiRoot(), 'plugins');
+}
+
+/**
+ * Where a plugin declares MCP servers. The native manifest carries them inline
+ * (measured), ahead of the spec copies `npx plugins` also dereferences.
+ */
+function mcpCandidates(): PluginMcpCandidate[] {
+  return [
+    { kind: 'inline', manifest: join('.kimi-plugin', 'plugin.json') },
+    { kind: 'spec', file: '.mcp.json' },
+    { kind: 'spec', file: 'mcp.json' },
+  ];
 }
 
 function configFile(): string {
@@ -93,13 +105,7 @@ export const kimi: HostReader = {
     }
     for (const plugin of this.listInstalled()) {
       if (plugin.path === undefined || !existsSync(plugin.path)) continue;
-      entries.push(
-        ...collectPluginServers(plugin.id, plugin.path, [
-          { kind: 'inline', manifest: join('.kimi-plugin', 'plugin.json') },
-          { kind: 'spec', file: '.mcp.json' },
-          { kind: 'spec', file: 'mcp.json' },
-        ]),
-      );
+      entries.push(...collectPluginServers(plugin.id, plugin.path, mcpCandidates()));
     }
     return entries;
   },
@@ -107,7 +113,7 @@ export const kimi: HostReader = {
 
 import type { HostWriter, AddOptions } from '../host';
 import type { PluginSource, ResolvedSource } from '../source';
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 export const kimiWriter: HostWriter = {
   ...kimi,
@@ -122,11 +128,13 @@ export const kimiWriter: HostWriter = {
       return;
     }
 
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-      cpSync(plugin.dir, targetDir, { recursive: true });
-    }
-    
+    // kimi's install dir is *not* version-addressed (`plugins/managed/<id>`),
+    // so re-adding must replace the copy rather than keep the first one —
+    // otherwise `update` would re-register a stale tree.
+    if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true });
+    mkdirSync(targetDir, { recursive: true });
+    cpSync(plugin.dir, targetDir, { recursive: true });
+
     // add shim if needed
     const pluginJson = join(targetDir, '.plugin', 'plugin.json');
     const rootPluginJson = join(targetDir, 'plugin.json');
@@ -161,6 +169,10 @@ export const kimiWriter: HostWriter = {
     
     mkdirSync(dirname(regFile), { recursive: true });
     writeFileSync(regFile, JSON.stringify(reg, null, 2));
+  },
+  async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
+    if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
+    return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
   },
   async remove(id: string): Promise<void> {
     const regFile = join(pluginsDir(), 'installed.json');

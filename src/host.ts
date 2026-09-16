@@ -66,9 +66,46 @@ export interface AddOptions {
   dryRun?: boolean;
 }
 
+export interface PinOptions {
+  /** Report what would change without writing. */
+  dryRun?: boolean;
+  /** Restrict the pass to these server names (`update` re-applies recorded pins). */
+  only?: readonly string[];
+}
+
+/** One bare `command` rewritten to the absolute path it resolved to. */
+export interface PinChange {
+  server: string;
+  from: string;
+  to: string;
+  /** The file the rewrite was written to. */
+  file: string;
+}
+
+/** One bare `command` that did not resolve — left untouched, reported as ✗. */
+export interface PinRefusal {
+  server: string;
+  command: string;
+  file: string;
+}
+
+export interface PinOutcome {
+  changes: PinChange[];
+  refusals: PinRefusal[];
+}
+
 import type { PluginSource, ResolvedSource } from './source';
 
 export interface HostWriter extends HostReader {
   add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void>;
   remove(id: string): Promise<void>;
+  /**
+   * Rewrite every *bare* stdio `command` in this plugin's installed copy to the
+   * absolute path it resolves to on this process's PATH, so a GUI host with no
+   * shell PATH can still launch it (spec §7.2.1: whether a configured PATH
+   * participates in bare-name resolution is client-defined; plugins MUST NOT
+   * depend on it). A command that does not resolve is left alone and returned
+   * in `refusals` — `pin` never guesses.
+   */
+  pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome>;
 }

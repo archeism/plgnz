@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, isAbsolute } from 'node:path';
 import { homeRoot } from './paths';
 
 export interface PluginSource {
@@ -38,7 +38,10 @@ export function resolveSource(source: string): ResolvedSource {
       if (clone.status !== 0) throw new Error(`Failed to clone ${source}`);
     }
   } else {
-    targetDir = join(process.cwd(), source);
+    // An absolute source (what `add` records in state.json, and what `update`
+    // feeds back) must not be re-rooted at the cwd — path.join does not reset
+    // on an absolute second argument.
+    targetDir = isAbsolute(source) ? source : join(process.cwd(), source);
     if (!existsSync(targetDir)) throw new Error(`Local source not found: ${targetDir}`);
     const rev = spawnSync('git', ['-C', targetDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
     if (rev.status === 0) {

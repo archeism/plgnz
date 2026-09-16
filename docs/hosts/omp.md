@@ -54,6 +54,13 @@ never routed through a repository-root `.mcp.json`.
 - No staleness source: omp's registry has no sha column; unknown-staleness
   applies until `add` records one in state.json.
 
+## Pin
+
+`pin` rewrites the bare `command` of every stdio server in an install dir's
+`.mcp.json` / `mcp.json`. No install on this machine declares MCP yet, so the
+path is defensive like the reader's. omp is not a GUI host and is not a
+default `pin` target. Rationale: `docs/pin-and-update.md`.
+
 ## Evidence paths (read 2026-09-16)
 
 - `~/.omp/plugins/installed_plugins.json` — registry (e.g. `mattpocock@personal` → `installPath` into `cache/plugins/personal___mattpocock___0.1.0`)

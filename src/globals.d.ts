@@ -15,8 +15,10 @@ declare module 'node:fs' {
   };
   export function accessSync(path: string, mode?: number): void;
   export function mkdirSync(path: string, options?: { recursive?: boolean }): string | undefined;
+  export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void;
   export function cpSync(src: string, dest: string, options?: { recursive?: boolean }): void;
   export function writeFileSync(path: string, data: string): void;
+  export function chmodSync(path: string, mode: number): void;
   export function mkdtempSync(prefix: string): string;
   export const constants: { X_OK: number };
 }
@@ -53,10 +55,12 @@ declare module 'bun:test' {
   export const test: typeof it;
   export function expect(actual: unknown): {
     toBe(expected: unknown): void;
+    toEqual(expected: unknown): void;
     toContain(expected: unknown): void;
     toMatch(pattern: RegExp): void;
     toHaveLength(expected: number): void;
     toBeGreaterThan(expected: number): void;
+    toBeUndefined(): void;
   };
 }
 

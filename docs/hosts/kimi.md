@@ -32,6 +32,19 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
   and kimi's shadow semantics for them are **unverified**; doctor reports the
   generic shadow/duplicate message if a collision ever appears.
 
+## Write side (add / pin / update)
+
+- **`add` is idempotent and destroys the previous copy.** The install dir is
+  `plugins/managed/<id>` — *not* version-addressed — so a re-add deletes the
+  tree and re-copies rather than leaving the first one in place. Without that,
+  `update` would re-register a stale tree under a fresh ledger sha.
+- **`pin` rewrites** the inline `mcpServers` in `.kimi-plugin/plugin.json`
+  plus `.mcp.json` and `mcp.json` — all three carry the server, and the reader
+  prefers the inline manifest, so pinning only the spec copies would leave
+  kimi launching the bare command. kimi is not a GUI host, so it is not a
+  default `pin` target; `pin --target kimi` / `--all` reach it. Rationale:
+  `docs/pin-and-update.md`.
+
 ## Evidence paths (read 2026-09-16)
 
 - `~/.kimi-code/plugins/installed.json` — registry shape, `omakase` row with `root`/`originalSource`

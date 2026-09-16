@@ -37,6 +37,15 @@ Measured 2026-09-16 on this machine (`~/.codex`). Reader: `src/hosts/codex.ts`.
   wins over a plugin-provided server of the same name; doctor reports ✗ with
   "the user entry wins and silently shadows the plugin server".
 
+## Pin
+
+`pin` rewrites the file `.codex-plugin/plugin.json` **points at**
+(`"mcpServers": "./.mcp.json"`, resolved against the plugin root) plus
+`mcp.json`. The pointer string is not a command and is left alone — codex
+resolves it itself. `~/.codex/config.toml` `[mcp_servers.*]` is the user's own
+config and is never touched. codex is not a GUI host, so it is not a default
+`pin` target. Rationale: `docs/pin-and-update.md`.
+
 ## Evidence paths (read 2026-09-16)
 
 - `~/.codex/config.toml:566` — `[plugins."omakase@plugins-cli"] enabled = true`

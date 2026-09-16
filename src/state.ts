@@ -12,10 +12,15 @@
  *       "id": "omakase@oh-my-ai-sdk",       // same id as listInstalled()
  *       "source": "/path/to/git/checkout",  // local git source whose HEAD is the freshness yardstick
  *       "sourceSha": "4f6f7f0a414e…",       // source HEAD at install time
- *       "installedAt": "2026-09-16T14:08:23.259Z"
+ *       "installedAt": "2026-09-16T14:08:23.259Z",
+ *       "pins": ["omakase"]                 // server names `pin` rewrote to an absolute path
  *     }
  *   ]
  * }
+ *
+ * `pins` (optional) is what `update` re-applies: re-adding a plugin restores
+ * the source's bare `command`, so a recorded pin must be re-run on the fresh
+ * copy. Absent means `pin` never rewrote anything for that install.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -27,6 +32,8 @@ export interface InstallRecord {
   source: string;
   sourceSha: string;
   installedAt?: string;
+  /** Server names `pin` rewrote to an absolute path in this host's copy, sorted. */
+  pins?: string[];
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -42,7 +49,14 @@ function coerceInstall(v: unknown): InstallRecord | null {
   const sourceSha = typeof rec['sourceSha'] === 'string' ? rec['sourceSha'] : null;
   if (host === null || id === null || source === null || sourceSha === null) return null;
   const installedAt = typeof rec['installedAt'] === 'string' ? rec['installedAt'] : undefined;
-  return installedAt === undefined ? { host, id, source, sourceSha } : { host, id, source, sourceSha, installedAt };
+  const rawPins = rec['pins'];
+  const pins = Array.isArray(rawPins)
+    ? rawPins.filter((p): p is string => typeof p === 'string' && p.length > 0)
+    : undefined;
+  const record: InstallRecord = { host, id, source, sourceSha };
+  if (installedAt !== undefined) record.installedAt = installedAt;
+  if (pins !== undefined && pins.length > 0) record.pins = pins;
+  return record;
 }
 
 /** Read the ledger; a missing or malformed file is an empty ledger, never a crash. */

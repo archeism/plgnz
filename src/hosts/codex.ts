@@ -19,12 +19,25 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, dirname } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
+import type { HostReader, InstalledPlugin, McpServerEntry, PinOptions, PinOutcome } from '../host';
 import { codexHome } from '../paths';
-import { collectPluginServers, type RawServerDef } from '../mcp';
+import { collectPluginServers, pinPluginMcpFiles, type PluginMcpCandidate, type RawServerDef } from '../mcp';
 
 function configFile(): string {
   return join(codexHome(), 'config.toml');
+}
+
+/**
+ * Where a plugin declares MCP servers. `.codex-plugin/plugin.json` measured as
+ * a *pointer* (`"mcpServers": "./.mcp.json"`), never inline, so pinning it is a
+ * no-op — the pointed file is a spec candidate here and is pinned directly.
+ */
+function mcpCandidates(): PluginMcpCandidate[] {
+  return [
+    { kind: 'inline', manifest: join('.codex-plugin', 'plugin.json') },
+    { kind: 'spec', file: '.mcp.json' },
+    { kind: 'spec', file: 'mcp.json' },
+  ];
 }
 
 function parseConfig(): Record<string, unknown> | null {
@@ -124,13 +137,7 @@ export const codex: HostReader = {
     }
     for (const plugin of this.listInstalled()) {
       if (plugin.path === undefined || !existsSync(plugin.path)) continue;
-      entries.push(
-        ...collectPluginServers(plugin.id, plugin.path, [
-          { kind: 'inline', manifest: join('.codex-plugin', 'plugin.json') },
-          { kind: 'spec', file: '.mcp.json' },
-          { kind: 'spec', file: 'mcp.json' },
-        ]),
-      );
+      entries.push(...collectPluginServers(plugin.id, plugin.path, mcpCandidates()));
     }
     return entries;
   },
@@ -197,6 +204,10 @@ export const codexWriter: HostWriter = {
 
     mkdirSync(dirname(configPath), { recursive: true });
     writeFileSync(configPath, newToml);
+  },
+  async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
+    if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
+    return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
   },
   async remove(id: string): Promise<void> {
     const configPath = configFile();

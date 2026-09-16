@@ -13,9 +13,17 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
+import type { HostReader, InstalledPlugin, McpServerEntry, PinOptions, PinOutcome } from '../host';
 import { claudeCodeRoot, homeRoot } from '../paths';
-import { collectPluginServers, collectUserServers, readJson } from '../mcp';
+import { collectPluginServers, collectUserServers, pinPluginMcpFiles, readJson, type PluginMcpCandidate } from '../mcp';
+
+/** Where a plugin copy declares MCP servers (spec `mcp.json`, plus the `npx plugins` `.mcp.json` twin). */
+function mcpCandidates(): PluginMcpCandidate[] {
+  return [
+    { kind: 'spec', file: '.mcp.json' },
+    { kind: 'spec', file: 'mcp.json' },
+  ];
+}
 
 interface InstallRecordShape {
   scope?: string;
@@ -87,12 +95,7 @@ export const claudeCode: HostReader = {
     entries.push(...collectUserServers(userConfigFile(), claudeCodeRoot()));
     for (const plugin of this.listInstalled()) {
       if (plugin.path === undefined || !existsSync(plugin.path)) continue;
-      entries.push(
-        ...collectPluginServers(plugin.id, plugin.path, [
-          { kind: 'spec', file: '.mcp.json' },
-          { kind: 'spec', file: 'mcp.json' },
-        ]),
-      );
+      entries.push(...collectPluginServers(plugin.id, plugin.path, mcpCandidates()));
     }
     return entries;
   },
@@ -157,6 +160,10 @@ export const claudeCodeWriter: HostWriter = {
     reg.plugins[id] = [entry];
     mkdirSync(dirname(regFile), { recursive: true });
     writeFileSync(regFile, JSON.stringify(reg, null, 2));
+  },
+  async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
+    if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
+    return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
   },
   async remove(id: string): Promise<void> {
     const regFile = join(pluginsDir(), 'installed_plugins.json');

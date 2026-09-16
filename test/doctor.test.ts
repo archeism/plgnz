@@ -216,13 +216,13 @@ describe('doctor · CLI', () => {
     expect(parsed.some((f) => f.host === 'codex' && f.mark === '✗')).toBe(true);
   });
 
-  test('stubbed verbs exit 2', () => {
-    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'pin'], {
+  test('an unknown verb exits 2 with the usage text', () => {
+    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'frobnicate'], {
       encoding: 'utf8',
       env: { ...process.env, OPEN_PLUGIN_HOME: '/nonexistent-open-plugin-home' },
     });
     expect(r.status).toBe(2);
-    expect(r.stderr).toContain('not implemented');
+    expect(r.stderr).toContain('unknown verb');
   });
 });
 

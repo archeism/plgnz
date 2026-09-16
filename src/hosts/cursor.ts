@@ -11,16 +11,24 @@
  * Plugin MCP is declared in `.mcp.json` (and a spec `mcp.json` copy) at the
  * plugin root. Cursor is a GUI host: `launchctl getenv PATH` is unset, so bare
  * commands cannot be assumed to resolve (spec §7.2.1) — doctor flags them and
- * `pin` rewrites them to absolute paths.
+ * `pin` rewrites them to absolute paths; `add` pins a fresh copy the same way.
  */
-import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
+import type { HostReader, InstalledPlugin, McpServerEntry, PinOptions, PinOutcome } from '../host';
 import { cursorRoot } from '../paths';
-import { collectPluginServers, collectUserServers, readJson } from '../mcp';
+import { collectPluginServers, collectUserServers, pinPluginMcpFiles, readJson, type PluginMcpCandidate } from '../mcp';
 
 function localDir(): string {
   return join(cursorRoot(), 'plugins', 'local');
+}
+
+/** Where a plugin copy may declare MCP servers, in cursor's priority order. */
+function mcpCandidates(): PluginMcpCandidate[] {
+  return [
+    { kind: 'spec', file: '.mcp.json' },
+    { kind: 'spec', file: 'mcp.json' },
+  ];
 }
 
 function userConfigFile(): string {
@@ -65,12 +73,7 @@ export const cursor: HostReader = {
     entries.push(...collectUserServers(userConfigFile(), cursorRoot()));
     for (const plugin of this.listInstalled()) {
       if (plugin.path === undefined || !existsSync(plugin.path)) continue;
-      entries.push(
-        ...collectPluginServers(plugin.id, plugin.path, [
-          { kind: 'spec', file: '.mcp.json' },
-          { kind: 'spec', file: 'mcp.json' },
-        ]),
-      );
+      entries.push(...collectPluginServers(plugin.id, plugin.path, mcpCandidates()));
     }
     return entries;
   },
@@ -78,9 +81,8 @@ export const cursor: HostReader = {
 
 import type { HostWriter, AddOptions } from '../host';
 import type { PluginSource, ResolvedSource } from '../source';
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync } from 'node:fs';
 import * as fs from 'node:fs';
-import { which, resolveCommandPath } from '../exec';
 
 export const cursorWriter: HostWriter = {
   ...cursor,
@@ -111,37 +113,13 @@ export const cursorWriter: HostWriter = {
       cpSync(sourceManifest, cursorPluginJson);
     }
 
-    const pinMcp = (file: string) => {
-      const p = join(targetDir, file);
-      if (!existsSync(p)) return;
-      try {
-        const data = JSON.parse(readFileSync(p, 'utf8'));
-        if (data && data.mcpServers) {
-          let changed = false;
-          for (const key in data.mcpServers) {
-            const srv = data.mcpServers[key];
-            if (srv && srv.type === 'stdio' && typeof srv.command === 'string') {
-              const cmd = srv.command;
-              let abs = cmd;
-              if (cmd.includes('/')) {
-                abs = resolveCommandPath(cmd, targetDir);
-              } else {
-                const w = which(cmd);
-                if (w) abs = w;
-              }
-              if (abs !== cmd) {
-                srv.command = abs;
-                changed = true;
-              }
-            }
-          }
-          if (changed) writeFileSync(p, JSON.stringify(data, null, 2));
-        }
-      } catch {}
-    };
-
-    pinMcp('mcp.json');
-    pinMcp('.mcp.json');
+    // Cursor is a GUI host with no shell PATH, so a freshly copied plugin is
+    // pinned as it lands (the same repair `pin` performs on an existing copy).
+    pinPluginMcpFiles(targetDir, mcpCandidates());
+  },
+  async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
+    if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
+    return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
   },
   async remove(id: string): Promise<void> {
     const targetDir = join(localDir(), id);

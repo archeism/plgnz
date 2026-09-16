@@ -23,12 +23,20 @@
 import * as fs from 'node:fs';
 import { existsSync, cpSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync} from 'node:fs';
 import { join, dirname } from 'node:path';
-import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
+import type { HostReader, InstalledPlugin, McpServerEntry, PinOptions, PinOutcome } from '../host';
 import { ompRoot } from '../paths';
-import { collectPluginServers, readJson } from '../mcp';
+import { collectPluginServers, pinPluginMcpFiles, readJson, type PluginMcpCandidate } from '../mcp';
 
 function pluginsDir(): string {
   return join(ompRoot(), 'plugins');
+}
+
+/** Where a plugin copy declares MCP servers (spec `mcp.json`, plus the `.mcp.json` twin). */
+function mcpCandidates(): PluginMcpCandidate[] {
+  return [
+    { kind: 'spec', file: '.mcp.json' },
+    { kind: 'spec', file: 'mcp.json' },
+  ];
 }
 
 /** enabled state from omp-plugins.lock.json, keyed by bare plugin name. */
@@ -93,12 +101,7 @@ export const omp: HostReader = {
     const entries: McpServerEntry[] = [];
     for (const plugin of this.listInstalled()) {
       if (plugin.path === undefined || !existsSync(plugin.path)) continue;
-      entries.push(
-        ...collectPluginServers(plugin.id, plugin.path, [
-          { kind: 'spec', file: '.mcp.json' },
-          { kind: 'spec', file: 'mcp.json' },
-        ]),
-      );
+      entries.push(...collectPluginServers(plugin.id, plugin.path, mcpCandidates()));
     }
     return entries;
   },
@@ -166,6 +169,10 @@ export const ompWriter: HostWriter = {
       lock.plugins[plugin.name].enabled = true;
     }
     writeFileSync(lockFile, JSON.stringify(lock, null, 2));
+  },
+  async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
+    if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
+    return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
   },
   async remove(id: string): Promise<void> {
     const regFile = join(pluginsDir(), 'installed_plugins.json');

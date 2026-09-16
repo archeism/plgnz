@@ -41,6 +41,14 @@ override). Per-project `mcpServers` under `projects.<path>` are not read in v0.
   `plugin:` prefix means they coexist (duplicate), no silent shadow observed;
   doctor reports the generic shadow/duplicate message.
 
+## Pin
+
+`pin` rewrites the bare `command` of every stdio server in a cache slot's
+`.mcp.json` and `mcp.json` (both carry the server). `~/.claude.json`'s
+top-level `mcpServers` is user-level config and is never touched. claude-code
+is not a GUI host, so it is not a default `pin` target; `--all` reaches it.
+Rationale: `docs/pin-and-update.md`.
+
 ## Evidence paths (read 2026-09-16)
 
 - `~/.claude/plugins/installed_plugins.json` — registry shape, `omakase@oh-my-ai-sdk` row with `installPath`/`gitCommitSha`
