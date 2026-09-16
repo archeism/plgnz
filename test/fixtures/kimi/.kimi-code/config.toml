@@ -1,0 +1,4 @@
+# fixture kimi config — scrubbed
+[mcp_servers.shared-server]
+command = "/bin/echo"
+args = []

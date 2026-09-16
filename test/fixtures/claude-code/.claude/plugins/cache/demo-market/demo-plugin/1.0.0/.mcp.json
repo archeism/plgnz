@@ -1,0 +1,24 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "demo-server": {
+      "type": "stdio",
+      "command": "/nonexistent/open-plugin/dead-server",
+      "args": [
+        "serve"
+      ]
+    },
+    "shared-server": {
+      "type": "stdio",
+      "command": "/bin/echo"
+    },
+    "placeholder-server": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/demo-launcher.sh"
+    },
+    "mystery-server": {
+      "type": "stdio",
+      "command": "${MYSTERY_VAR}/bin/server"
+    }
+  }
+}

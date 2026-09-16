@@ -5,8 +5,8 @@
 ## Verbs
 - `add <source> [--target <host>…]` — install a plugin from a marketplace dir or git URL into each host's **native** store.
 - `doctor` — read-only. (1) every configured stdio `command` resolves to an executable; (2) no hand-written entry shadows/duplicates a plugin-provided server of the same name; (3) installs are at the marketplace head. Prints findings, exits non-zero on ✗, never edits.
-- `pin` — rewrite a bare `command` to its absolute path for GUI hosts (macOS GUI apps have no shell PATH).
-- `update` — idempotent re-`add`; re-materializes copy-based hosts.
+- `pin [--target <host>…|--all] [--dry-run]` — rewrite a plugin-provided bare `command` to its absolute path for GUI hosts (macOS GUI apps have no shell PATH). Refuses (✗) a command that does not resolve; never touches a host's user-level config.
+- `update [name]` — idempotent re-`add` from the recorded `state.json` source; re-materializes copy-based hosts and re-applies recorded pins. Never modifies a plugin with no record — reports it instead.
 - `list`, `remove`, `targets`.
 
 ## Hosts (v0, native stores owned by this tool)

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "demo-plugin",
+  "version": "1.0.0",
+  "skills": "./skills/",
+  "mcpServers": {
+    "demo-server": {
+      "type": "stdio",
+      "command": "/nonexistent/open-plugin/dead-server",
+      "args": ["serve"]
+    },
+    "shared-server": {
+      "type": "stdio",
+      "command": "/bin/echo"
+    }
+  }
+}

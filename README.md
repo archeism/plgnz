@@ -6,8 +6,15 @@ Open-source installer **and doctor** for agent plugins (Agent Plugins / OpenPlug
 npx open-plugin add <marketplace-or-git-url>   # into each host's native plugin store
 npx open-plugin doctor                          # dead commands, shadowed entries, stale installs
 npx open-plugin pin                             # absolute command paths for GUI hosts
-npx open-plugin update
+npx open-plugin update                          # re-add from the recorded source, re-pin
 ```
+
+`pin` rewrites a plugin's bare stdio `command` to the absolute path it resolves
+to right now — a macOS GUI host like Cursor starts with no shell PATH, so a
+spec-valid bare `command` never launches there. `update` is an idempotent
+re-`add` from the source recorded in `state.json`, plus the pins that install
+carried. Both refuse rather than guess, and neither will touch a plugin this
+tool did not install. Details: `docs/pin-and-update.md`.
 
 Why another tool: `npx plugins` is closed-source and its Cursor target does not install into Cursor; nothing in the ecosystem checks that an installed plugin still *works*. See `docs/research/`.
 
