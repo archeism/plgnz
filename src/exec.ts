@@ -67,3 +67,25 @@ export function gitHead(dir: string): string | null {
     return null;
   }
 }
+
+/**
+ * A remote git source — the URL prefixes `add` accepts (src/source.ts
+ * `resolveSource`). One predicate shared by `add` and doctor so the source
+ * kinds that get recorded and the source kinds doctor can freshness-check
+ * cannot drift apart.
+ */
+export function isGitUrl(source: string): boolean {
+  return source.startsWith('http://') || source.startsWith('https://') || source.startsWith('git@');
+}
+
+/** Current HEAD sha of a git remote via `git ls-remote`, or null when unreachable. */
+export function gitRemoteHead(url: string): string | null {
+  try {
+    const r = spawnSync('git', ['ls-remote', url, 'HEAD'], { encoding: 'utf8' });
+    if (r.status !== 0) return null;
+    const sha = r.stdout.split('\t')[0]?.trim() ?? '';
+    return /^[0-9a-f]{40}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}

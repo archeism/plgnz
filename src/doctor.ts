@@ -3,7 +3,8 @@
  *
  * Read-only by construction: this module imports only host *readers*
  * (`HostReader`, src/hosts/index.ts), never a writer, and touches no file
- * except reading configs and running `git rev-parse` on recorded sources.
+ * except reading configs and running `git rev-parse` / `git ls-remote`
+ * against recorded sources.
  *
  * Three checks (AGENTS.md contract):
  *  (1) command resolution — every stdio server in each host's native MCP
@@ -18,9 +19,11 @@
  *      entry wins and silently shadows the plugin server; on cursor both
  *      load and duplicate.
  *  (3) staleness — the installed plugin's recorded source sha (state.json,
- *      written by `add`) vs the source's current head. Installs made by
- *      another tool have no record: report `unknown` — never treat a missing
- *      record as fresh or as zero.
+ *      written by `add`) vs the source's current head: `git rev-parse` for a
+ *      local checkout, `git ls-remote` for a git URL (recorded verbatim by
+ *      `add`, so it is the same query the install was resolved with).
+ *      Installs made by another tool have no record: report `unknown` —
+ *      never treat a missing record as fresh or as zero.
  *
  * Output: one line per finding `<host>  ✓|✗|!  <message>`; `--json` emits
  * the same as an array; exit 1 if any ✗, else 0.
@@ -31,7 +34,7 @@
 import type { HostReader, McpServerEntry } from './host';
 import { hosts as allHosts } from './hosts';
 import { findRecord, readState, type InstallRecord } from './state';
-import { expandRootPlaceholders, gitHead, isExecutableFile, resolveCommandPath, which } from './exec';
+import { expandRootPlaceholders, gitHead, gitRemoteHead, isExecutableFile, isGitUrl, resolveCommandPath, which } from './exec';
 
 export type Mark = '✓' | '✗' | '!';
 
@@ -170,7 +173,10 @@ function checkStaleness(host: HostReader, state: InstallRecord[], out: DoctorFin
       });
       continue;
     }
-    const head = gitHead(record.source);
+    // A git-URL source is recorded verbatim by `add` and has no local
+    // checkout to rev-parse — its head comes from `git ls-remote`, the same
+    // query that resolved the install (src/source.ts).
+    const head = isGitUrl(record.source) ? gitRemoteHead(record.source) : gitHead(record.source);
     if (head === null) {
       out.push({
         host: host.id,

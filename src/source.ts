@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename, isAbsolute } from 'node:path';
 import { homeRoot } from './paths';
+import { isGitUrl } from './exec';
 
 export interface PluginSource {
   dir: string;
@@ -18,7 +19,7 @@ export interface ResolvedSource {
 }
 
 export function resolveSource(source: string): ResolvedSource {
-  const isGit = source.startsWith('http://') || source.startsWith('https://') || source.startsWith('git@');
+  const isGit = isGitUrl(source);
   let targetDir = source;
   let sha = 'local';
   

@@ -24,8 +24,9 @@ that var is set (tests), else `~/.open-plugin/state.json` (never a bare file in
 - `host`/`id` — exactly the `HostReader.id` and `InstalledPlugin.id` the
   reader reports, so the ledger joins 1:1 onto `listInstalled()`.
 - `source` — a local git checkout (marketplace clone or repo) whose HEAD is
-  the freshness yardstick. Remote URLs are recorded but v0 cannot resolve
-  their head; doctor then reports `! cannot determine head`.
+  the freshness yardstick, or a git URL (`http(s)://…`, `git@…`), recorded
+  verbatim, whose head doctor resolves with `git ls-remote` — the same query
+  `add` used. An unreachable remote → `! cannot determine head`.
 - `sourceSha` — full or host-short sha; comparison is prefix-tolerant
   (claude-code records 12 chars).
 - `pins` — server names this tool rewrote to an absolute `command` (see
