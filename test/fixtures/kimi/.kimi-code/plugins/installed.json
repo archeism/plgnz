@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "demo-plugin",
+      "root": "__HOME__/.kimi-code/plugins/managed/demo-plugin",
+      "source": "local-path",
+      "enabled": true,
+      "installedAt": "2026-09-16T00:00:00.000Z",
+      "updatedAt": "2026-09-16T00:00:00.000Z",
+      "originalSource": "__HOME__/.cache/plugins/.install-staging/demo/repo/plugin/demo-plugin"
+    }
+  ]
+}

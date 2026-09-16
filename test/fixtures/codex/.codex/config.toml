@@ -1,0 +1,10 @@
+# fixture codex config — scrubbed, commands only
+[mcp_servers.healthy-user]
+command = "/bin/echo"
+args = ["user"]
+
+[mcp_servers.shared-server]
+command = "/bin/echo"
+
+[plugins."demo-plugin@demo-market"]
+enabled = true

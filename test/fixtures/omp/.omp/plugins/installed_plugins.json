@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "plugins": {
+    "demo-plugin@demo-market": [
+      {
+        "scope": "user",
+        "installPath": "__HOME__/.omp/plugins/cache/plugins/demo-market___demo-plugin___1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-09-16T00:00:00.000Z",
+        "lastUpdated": "2026-09-16T00:00:00.000Z"
+      }
+    ]
+  }
+}

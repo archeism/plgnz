@@ -1,0 +1,69 @@
+/**
+ * Command-resolution and git helpers shared by doctor.
+ */
+import { accessSync, constants, statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+/** A path that exists and is an executable regular file. */
+export function isExecutableFile(p: string): boolean {
+  try {
+    if (!statSync(p).isFile()) return false;
+    accessSync(p, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a bare command on *this process's* PATH; null when not found. */
+export function which(command: string): string | null {
+  const pathEnv = process.env['PATH'] ?? '';
+  for (const dir of pathEnv.split(':')) {
+    if (dir.length === 0) continue;
+    const candidate = join(dir, command);
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Resolve a command containing `/` (spec §7.2.1 allows bare names or
+ * plugin-relative `./` paths). Absolute paths pass through; relative paths
+ * resolve against `baseDir` (the plugin root, or the config file's root).
+ */
+export function resolveCommandPath(command: string, baseDir: string): string {
+  return isAbsolute(command) ? command : join(baseDir, command);
+}
+
+/**
+ * Root placeholders hosts expand at launch: spec §9.2 defines `${PLUGIN_ROOT}`;
+ * the CLAUDE_/CODEX_/CURSOR_ variants are host-native conventions measured in
+ * real caches (e.g. `${CODEX_PLUGIN_ROOT}/scripts/air-launcher.sh`). spec
+ * §7.2.1 forbids placeholder expansion in a spec `command`, so these only
+ * occur in host-native config files. Unknown placeholders are reported back
+ * so doctor can mark the entry unverifiable instead of dead.
+ */
+const ROOT_PLACEHOLDERS = new Set(['PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT', 'CODEX_PLUGIN_ROOT', 'CURSOR_PLUGIN_ROOT']);
+
+export function expandRootPlaceholders(command: string, root: string): { expanded: string; unknown: string | null } {
+  let unknown: string | null = null;
+  const expanded = command.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (whole, name: string) => {
+    if (ROOT_PLACEHOLDERS.has(name)) return root;
+    unknown = whole;
+    return whole;
+  });
+  return { expanded, unknown };
+}
+
+/** Current HEAD sha of a local git checkout, or null when unavailable. */
+export function gitHead(dir: string): string | null {
+  try {
+    const r = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+    if (r.status !== 0) return null;
+    const sha = r.stdout.trim();
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}

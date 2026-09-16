@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "shared-server": {
+      "type": "stdio",
+      "command": "/bin/echo"
+    },
+    "remote-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp"
+    }
+  }
+}

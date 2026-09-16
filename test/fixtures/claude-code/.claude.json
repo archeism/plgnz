@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "healthy-user": {
+      "type": "stdio",
+      "command": "/bin/echo",
+      "args": ["user"]
+    },
+    "shared-server": {
+      "type": "stdio",
+      "command": "/bin/echo"
+    }
+  }
+}
