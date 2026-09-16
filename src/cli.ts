@@ -135,7 +135,7 @@ export async function main(argv: string[]): Promise<number> {
         for (const plugin of resolved.plugins) {
           await w.add(plugin, resolved, { dryRun: flags.dryRun });
           if (!flags.dryRun) {
-            const id = plugin.marketplace ? `${plugin.name}@${plugin.marketplace}` : plugin.name;
+            const installed = w.listInstalled(); const match = installed.find(p => p.name === plugin.name && (!plugin.marketplace || p.marketplace === plugin.marketplace)); const id = match ? match.id : (plugin.marketplace ? `${plugin.name}@${plugin.marketplace}` : plugin.name);
             const idx = state.findIndex(r => r.host === w.id && r.id === id);
             const previous = idx !== -1 ? state[idx] : undefined;
             const rec: InstallRecord = {
