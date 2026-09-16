@@ -13,8 +13,8 @@ export interface McpServerEntry {
   /** Server name as written in the config (`mcpServers` key / `[mcp_servers.<name>]`). */
   name: string;
   transport: 'stdio' | 'http';
-  /** Where the entry came from: host user-level config, an installed plugin, or omp's repo config. */
-  origin: 'user' | 'plugin' | 'config';
+  /** Where the entry came from: host user-level config or an installed plugin. */
+  origin: 'user' | 'plugin';
   /** `plugin@marketplace` (or bare plugin name) when origin is `plugin`. */
   pluginId?: string;
   /** Absolute path of the file the entry was read from. */

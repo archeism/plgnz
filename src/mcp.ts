@@ -6,15 +6,17 @@
  *    `{ $schema, mcpServers: { <name>: { type, command, args, … } } }`
  *    (spec §7.2.1: `mcpServers` member values are server configs; stdio
  *    servers carry a single-token `command`)
- *  - host-native manifests with inline `mcpServers` (kimi `.kimi-plugin/plugin.json`
- *    uses spec-style entries; codex `.codex-plugin/plugin.json` uses its
- *    config.toml shape: `command`/`args` with no `type`)
+ *  - host-native manifests with an `mcpServers` member, measured in two
+ *    variants: kimi `.kimi-plugin/plugin.json` carries the servers inline
+ *    (spec-style entries); codex `.codex-plugin/plugin.json` carries a
+ *    pointer string — `"mcpServers": "./.mcp.json"` — resolved against the
+ *    plugin root (13 manifests measured: 6 pointers, 7 absent, 0 inline)
  *
  * Measured on this machine, `npx plugins add` dereferences one source into
  * *all* of these per install dir, so the same server usually appears 2–3×;
  * identical restatements are deduped, keeping the highest-priority occurrence.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { McpServerEntry } from './host';
 
@@ -47,6 +49,20 @@ export function inlineMcpServers(manifestFile: string): Record<string, RawServer
   return servers as Record<string, RawServerDef>;
 }
 
+/**
+ * The file a host-native manifest's `mcpServers` points at, when it is a
+ * codex-style pointer string (`"./.mcp.json"`, resolved against the plugin
+ * root), or null when it is not a pointer / points nowhere.
+ */
+export function pointerMcpFile(manifestFile: string, pluginDir: string): string | null {
+  const root = readJson(manifestFile);
+  if (root === null) return null;
+  const pointer = root['mcpServers'];
+  if (typeof pointer !== 'string') return null;
+  const pointed = join(pluginDir, pointer);
+  return existsSync(pointed) ? pointed : null;
+}
+
 export function normalizeTransport(def: RawServerDef): 'stdio' | 'http' | null {
   const type = typeof def['type'] === 'string' ? def['type'] : undefined;
   if (type === 'http' || type === 'sse' || typeof def['url'] === 'string') return 'http';
@@ -67,10 +83,23 @@ export function collectPluginServers(
   const entries: McpServerEntry[] = [];
   const seen = new Set<string>();
   for (const candidate of candidates) {
-    const servers =
-      candidate.kind === 'spec'
-        ? specMcpServers(join(pluginDir, candidate.file))
-        : inlineMcpServers(join(pluginDir, candidate.manifest));
+    // A native manifest resolves to itself (inline servers) or, codex-style,
+    // to the spec file its `mcpServers` pointer names.
+    let file: string;
+    let servers: Record<string, RawServerDef> | null;
+    if (candidate.kind === 'spec') {
+      file = join(pluginDir, candidate.file);
+      servers = specMcpServers(file);
+    } else {
+      file = join(pluginDir, candidate.manifest);
+      const pointed = pointerMcpFile(file, pluginDir);
+      if (pointed !== null) {
+        file = pointed;
+        servers = specMcpServers(pointed);
+      } else {
+        servers = inlineMcpServers(file);
+      }
+    }
     if (servers === null) continue;
     for (const [name, def] of Object.entries(servers)) {
       const transport = normalizeTransport(def);
@@ -87,7 +116,7 @@ export function collectPluginServers(
         transport,
         origin: 'plugin',
         pluginId,
-        file: candidate.kind === 'spec' ? join(pluginDir, candidate.file) : join(pluginDir, candidate.manifest),
+        file,
         baseDir: pluginDir,
       };
       if (command !== undefined) entry.command = command;
@@ -100,11 +129,7 @@ export function collectPluginServers(
 }
 
 /** Collect entries from a host-level config file (`mcpServers` object shape). */
-export function collectUserServers(
-  file: string,
-  baseDir: string,
-  origin: 'user' | 'config' = 'user',
-): McpServerEntry[] {
+export function collectUserServers(file: string, baseDir: string): McpServerEntry[] {
   const servers = specMcpServers(file);
   if (servers === null) return [];
   const entries: McpServerEntry[] = [];
@@ -114,7 +139,7 @@ export function collectUserServers(
     const command = typeof def['command'] === 'string' ? def['command'] : undefined;
     const rawArgs = def['args'];
     const args = Array.isArray(rawArgs) ? rawArgs.filter((a): a is string => typeof a === 'string') : undefined;
-    const entry: McpServerEntry = { name, transport, origin, file, baseDir };
+    const entry: McpServerEntry = { name, transport, origin: 'user', file, baseDir };
     if (command !== undefined) entry.command = command;
     if (args !== undefined) entry.args = args;
     if (def['enabled'] === false) entry.enabled = false;

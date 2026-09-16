@@ -2,9 +2,9 @@
 
 Measured 2026-09-16 on this machine (`~/.omp`). Reader: `src/hosts/omp.ts`.
 
-omp is a native plugin host with its own store (AGENTS.md hosts list; landed
-in main as `d1db50f`), and omp sessions read their MCP config from the
-repository-root `.mcp.json` of the workspace they run in.
+omp is a **native plugin host with its own store** (AGENTS.md hosts list,
+landed in main as `d1db50f`; ground-truth "Correction" 2026-09-16). It is
+never routed through a repository-root `.mcp.json`.
 
 ## Store
 
@@ -30,20 +30,27 @@ repository-root `.mcp.json` of the workspace they run in.
 ~/.omp/marketplaces.json
   { "version": 1, "marketplaces": [ { "name": "personal", "sourceType": "local",
       "sourceUri": "<abs path>", "catalogPath": "<abs marketplace.json>", … } ] }
-
-<repo-root>/.mcp.json                 # per-session MCP config (the omp "user level")
 ```
 
 ## Reader decisions
 
+- The host is **present iff `~/.omp/plugins/` exists** — a repo-root
+  `.mcp.json` in the cwd must never conjure the omp host or its findings.
 - Install dirs come from `installPath`, falling back to the computed flat
   cache slot `cache/plugins/<marketplace>___<name>___<version>`.
 - `enabled` comes from `omp-plugins.lock.json`, keyed by bare plugin name.
-- **MCP surfaces**: the repository-root `.mcp.json` is read as the user-level
-  config (origin `user`, so shadow checks apply); plugin-declared MCP would be
-  read from the install dir's `.mcp.json`/`mcp.json` — **no install on this
-  machine declares any MCP today** (all four are skills-only), so that half is
-  defensive and exercised only by fixtures.
+- **MCP surface**: installed plugins' `.mcp.json`/`mcp.json` only. No install
+  on this machine declares any MCP today (all four are skills-only), so this
+  half is defensive and exercised by fixtures. omp has **no measured
+  user-level MCP config** (`~/.omp/mcp.json` does not exist), so doctor's
+  shadow check has no user side to trip on for omp in v0.
+- **Repo-root `.mcp.json` deliberately not read.** omp sessions do consult the
+  workspace `.mcp.json` (pre-Correction evidence line in the ground-truth
+  doc), but that file is the Claude Code project-level convention: reading it
+  under omp would attribute another host's project servers to omp (double
+  reporting) and make doctor output depend on the cwd. If a later phase wires
+  omp's session config in, it must come from omp's own documented config
+  resolution, not from the shared project file.
 - No staleness source: omp's registry has no sha column; unknown-staleness
   applies until `add` records one in state.json.
 
@@ -54,7 +61,10 @@ repository-root `.mcp.json` of the workspace they run in.
 - `~/.omp/plugins/omp-plugins.lock.json` — enabled/version lock
 - `~/.omp/plugins/node_modules/` — symlinks into the cache
 - `~/.omp/marketplaces.json` — marketplace registry (`sourceType: local`, `sourceUri`, `catalogPath`)
-- omakase-distribution-state-2026-09-16.md — "omp: not a plugins target; reads repo-root .mcp.json" (store measured after omp gained native plugin support)
+- omakase-distribution-state-2026-09-16.md — "Correction" section: omp is a
+  native plugin host (`omp plugin install|…|doctor|upgrade|marketplace`,
+  `~/.omp/plugins` store); the earlier "reads repo-root .mcp.json" line
+  describes omp's session config, not its plugin surface
 
 ## Open
 
@@ -62,3 +72,5 @@ repository-root `.mcp.json` of the workspace they run in.
 - Whether omp will read plugin `mcp.json` (spec §7.2.1) or a native
   equivalent when plugins declare MCP is unknown — nothing on disk declares
   any yet.
+- omp's own user-level/session MCP config location (if any) is unverified;
+  see the reader-decision above before wiring one in.

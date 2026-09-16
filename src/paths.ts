@@ -44,14 +44,6 @@ export function ompRoot(): string {
 }
 
 /**
- * omp sessions read their MCP config from the repository-root `.mcp.json`
- * (evidence: omakase-distribution-state-2026-09-16.md). Defaults to the cwd.
- */
-export function ompRepoRoot(): string {
-  return process.env['OPEN_PLUGIN_OMP_REPO_ROOT'] ?? process.cwd();
-}
-
-/**
  * open-plugin's own install ledger, written by `add`.
  * When `OPEN_PLUGIN_HOME` is set the ledger is `<home>/state.json`; in real use
  * it lives under `~/.open-plugin/state.json` so we never drop a file in `$HOME`.

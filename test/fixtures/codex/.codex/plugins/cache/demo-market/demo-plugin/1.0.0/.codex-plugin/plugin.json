@@ -2,13 +2,5 @@
   "name": "demo-plugin",
   "version": "1.0.0",
   "skills": "./skills/",
-  "mcpServers": {
-    "demo-server": {
-      "command": "/nonexistent/open-plugin/dead-server",
-      "args": ["serve"]
-    },
-    "shared-server": {
-      "command": "/bin/echo"
-    }
-  }
+  "mcpServers": "./.mcp.json"
 }

@@ -11,8 +11,9 @@ Measured 2026-09-16 on this machine (`~/.codex`). Reader: `src/hosts/codex.ts`.
                                        # or url (HTTP); optional enabled flag
 
 ~/.codex/plugins/cache/<marketplace>/<name>/<version>/   # install dirs
-  .codex-plugin/plugin.json   # native manifest WITH inline mcpServers (config.toml
-                              # shape: command/args, no type field)
+  .codex-plugin/plugin.json   # native manifest whose `mcpServers` is a pointer
+                              # string ("./.mcp.json") — never inline (13 measured:
+                              # 6 pointers, 7 absent)
   .mcp.json / mcp.json        # spec copies written by the plugins CLI
   .plugin/plugin.json         # spec §5.2 manifest
   skills/<skill>/SKILL.md
@@ -20,9 +21,9 @@ Measured 2026-09-16 on this machine (`~/.codex`). Reader: `src/hosts/codex.ts`.
 
 ## Reader decisions
 
-- **Plugin MCP source priority**: inline `.codex-plugin/plugin.json`
-  `mcpServers`, then `.mcp.json`, then `mcp.json` — all read, identical
-  entries deduped.
+- **Plugin MCP source priority**: `.codex-plugin/plugin.json` (its `mcpServers`
+  pointer resolved against the plugin root), then `.mcp.json`, then `mcp.json`
+  — all read, identical entries deduped.
 - Install dirs are keyed by version; when several exist the lexicographically
   highest subdir is picked (only single-version slots measured).
 - Native commands may use `${CODEX_PLUGIN_ROOT}` (measured:
@@ -40,7 +41,7 @@ Measured 2026-09-16 on this machine (`~/.codex`). Reader: `src/hosts/codex.ts`.
 
 - `~/.codex/config.toml:566` — `[plugins."omakase@plugins-cli"] enabled = true`
 - `~/.codex/config.toml:306+` — `[mcp_servers.*]` stdio (`command`/`args`) and url-type entries
-- `~/.codex/plugins/cache/plugins-cli/omakase/0.0.0/` — install dir with `.codex-plugin/plugin.json` (inline `mcpServers`), `.mcp.json`, `mcp.json`, `.plugin/`
+- `~/.codex/plugins/cache/plugins-cli/omakase/0.0.0/` — install dir with `.codex-plugin/plugin.json` (`"mcpServers": "./.mcp.json"`), `.mcp.json`, `mcp.json`, `.plugin/`
 - omakase-distribution-state-2026-09-16.md — the shadow incident: a hand-written `[mcp_servers.omakase]` shadowed the plugin server until deleted (`codex mcp list`)
 
 ## Open

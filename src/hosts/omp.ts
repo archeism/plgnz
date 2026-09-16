@@ -12,24 +12,22 @@
  *   ~/.omp/plugins/node_modules/<name>    — symlinks into the cache
  *   ~/.omp/marketplaces.json              — {marketplaces:[{name, sourceType, sourceUri, catalogPath}]}
  *
- * omp sessions read their MCP config from the repository-root `.mcp.json`
- * (evidence: omakase-distribution-state-2026-09-16.md), which is this host's
- * user-level surface for doctor's command and shadow checks; plugin-declared
- * MCP would live in the install dir's mcp.json/.mcp.json (none of the current
- * installs declare any — the reader supports them defensively).
+ * omp is a native plugin host with its own store (AGENTS.md hosts list; ground
+ * truth "Correction", 2026-09-16) — never routed through a repo-root
+ * `.mcp.json`, which is the Claude Code project convention, not omp's plugin
+ * surface. omp has no measured user-level MCP config (no ~/.omp/mcp.json on
+ * this machine), so doctor's MCP surface is the installed plugins'
+ * mcp.json/.mcp.json alone; the shadow check therefore has no user side to
+ * trip on until such a config is verified to exist.
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
-import { ompRepoRoot, ompRoot } from '../paths';
-import { collectPluginServers, collectUserServers, readJson } from '../mcp';
+import { ompRoot } from '../paths';
+import { collectPluginServers, readJson } from '../mcp';
 
 function pluginsDir(): string {
   return join(ompRoot(), 'plugins');
-}
-
-function repoMcpFile(): string {
-  return join(ompRepoRoot(), '.mcp.json');
 }
 
 /** enabled state from omp-plugins.lock.json, keyed by bare plugin name. */
@@ -47,8 +45,9 @@ export const omp: HostReader = {
   id: 'omp',
   gui: false,
 
+  /** omp is present iff its native store is — a stray repo .mcp.json must not conjure the host. */
   detect(): boolean {
-    return existsSync(pluginsDir()) || existsSync(repoMcpFile());
+    return existsSync(pluginsDir());
   },
 
   stores(): string[] {
@@ -91,10 +90,6 @@ export const omp: HostReader = {
 
   mcpEntries(): McpServerEntry[] {
     const entries: McpServerEntry[] = [];
-    // The repository-root .mcp.json is the session's MCP surface — treat it as
-    // the user-level config (origin 'user') so shadow checks apply if a plugin
-    // ever declares the same server name.
-    entries.push(...collectUserServers(repoMcpFile(), ompRepoRoot(), 'user'));
     for (const plugin of this.listInstalled()) {
       if (plugin.path === undefined || !existsSync(plugin.path)) continue;
       entries.push(

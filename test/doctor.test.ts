@@ -157,15 +157,49 @@ describe('doctor · cursor', () => {
 });
 
 describe('doctor · omp', () => {
-  test('dead command, shadowed name, unknown staleness', () => {
-    withHostEnv('omp', () => assertThreeChecks(omp, 'shadow or duplicate'));
-  });
-
-  test('repo-root .mcp.json commands are checked', () => {
+  test('dead command and unknown staleness from the native store', () => {
     withHostEnv('omp', () => {
       const result = runDoctor([omp]);
-      expect(result.findings.some((f) => f.mark === '✗' && f.message.includes('repo-dead-server'))).toBe(true);
-      expect(result.findings.some((f) => f.mark === '✓' && f.message.includes('repo-server'))).toBe(true);
+      // (1) dead absolute command → ✗, and any ✗ drives exit code 1
+      expect(
+        result.findings.some(
+          (f) => f.mark === '✗' && f.message.includes("server 'demo-server':") && f.message.includes('not found or not executable'),
+        ),
+      ).toBe(true);
+      expect(result.exitCode).toBe(1);
+      // (3) install with no state.json record → ! unknown, never fresh
+      expect(
+        result.findings.some((f) => f.mark === '!' && f.message.includes('staleness unknown') && f.message.includes('state.json')),
+      ).toBe(true);
+    });
+  });
+
+  test('omp is never routed through a repo-root .mcp.json (AGENTS.md)', () => {
+    withHostEnv('omp', (home) => {
+      // A repo-root .mcp.json in the cwd is the Claude Code project
+      // convention — it must not conjure omp findings (or the host itself).
+      writeFileSync(
+        join(home, '.mcp.json'),
+        JSON.stringify({
+          $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
+          mcpServers: { 'repo-dead-server': { type: 'stdio', command: '/nonexistent/open-plugin/repo-server' } },
+        }),
+      );
+      const prevCwd = process.cwd();
+      process.chdir(home);
+      try {
+        const result = runDoctor([omp]);
+        expect(result.findings.some((f) => f.message.includes('repo-dead-server'))).toBe(false);
+      } finally {
+        process.chdir(prevCwd);
+      }
+    });
+  });
+
+  test('no user-level MCP surface: no shadow findings for a plugin-only install', () => {
+    withHostEnv('omp', () => {
+      const result = runDoctor([omp]);
+      expect(result.findings.some((f) => f.message.includes('defined both in user config'))).toBe(false);
     });
   });
 });

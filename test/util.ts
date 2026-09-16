@@ -46,7 +46,6 @@ export function materialize(host: string): HostEnv {
   const env: Record<string, string> = { OPEN_PLUGIN_HOME: home };
   if (host === 'omp') {
     env['OPEN_PLUGIN_OMP_ROOT'] = join(home, '.omp');
-    env['OPEN_PLUGIN_OMP_REPO_ROOT'] = join(home, 'repo');
   }
   return { home, env };
 }

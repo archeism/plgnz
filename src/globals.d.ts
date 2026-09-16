@@ -63,6 +63,7 @@ declare module 'bun:test' {
 declare const process: {
   env: Record<string, string | undefined>;
   cwd(): string;
+  chdir(dir: string): void;
   argv: string[];
   platform: string;
   exitCode?: number;

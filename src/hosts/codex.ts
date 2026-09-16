@@ -7,9 +7,11 @@
  *                                                    = stdio, url = HTTP)
  *   ~/.codex/plugins/cache/<marketplace>/<name>/<version>/  — install dirs
  *
- * Plugin MCP is declared inline in `.codex-plugin/plugin.json` (`mcpServers`
- * member, config.toml shape with no `type`); the plugins CLI also writes spec
- * `.mcp.json`/`mcp.json` copies — all are read, identical entries deduped.
+ * Plugin MCP is declared via `.codex-plugin/plugin.json`'s `mcpServers`
+ * member, which measured as a pointer string (`"./.mcp.json"`, never inline,
+ * across 13 manifests) resolved against the plugin root; the plugins CLI also
+ * writes spec `.mcp.json`/`mcp.json` copies — all are read, identical entries
+ * deduped.
  *
  * Shadow semantics (measured): a user-level [mcp_servers.X] silently wins over
  * a plugin-provided server of the same name — see doctor check (2).
