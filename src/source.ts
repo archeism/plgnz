@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename, isAbsolute } from 'node:path';
-import { homeRoot } from './paths';
+import { cacheRoot } from './paths';
 import { isGitUrl } from './exec';
 
 export interface PluginSource {
@@ -29,8 +29,7 @@ export function resolveSource(source: string): ResolvedSource {
     sha = ls.stdout.split('\t')[0] || '';
     if (!sha || sha.length !== 40) throw new Error(`Invalid sha from git ls-remote: ${sha}`);
     
-    const openPluginHome = process.env['OPEN_PLUGIN_HOME'] || homeRoot();
-    const cacheDir = join(openPluginHome, 'cache');
+    const cacheDir = cacheRoot();
     mkdirSync(cacheDir, { recursive: true });
     targetDir = join(cacheDir, sha);
     

@@ -54,6 +54,18 @@ export function stateFile(): string {
   return join(process.env['HOME'] ?? '.', '.open-plugin', 'state.json');
 }
 
+/**
+ * open-plugin's git-source clone cache, written when `add` resolves a git URL
+ * (src/source.ts). Same rule as `stateFile()`: `<home>/cache` under
+ * `OPEN_PLUGIN_HOME`, `~/.open-plugin/cache` in real use — never a generic
+ * `cache/` directory dropped straight into `$HOME`.
+ */
+export function cacheRoot(): string {
+  const override = process.env['OPEN_PLUGIN_HOME'];
+  if (override && override.length > 0) return join(override, 'cache');
+  return join(process.env['HOME'] ?? '.', '.open-plugin', 'cache');
+}
+
 /** Test/debug helper: does a path exist? */
 export function pathExists(p: string): boolean {
   return existsSync(p);
