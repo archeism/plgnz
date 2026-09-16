@@ -14,8 +14,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runPin } from '../src/pin';
-import { cursorWriter } from '../src/hosts/cursor';
-import { kimiWriter } from '../src/hosts/kimi';
+import { cursorWriter } from '../src/hosts/cursor-writer';
+import { kimiWriter } from '../src/hosts/kimi-writer';
 import { readState } from '../src/state';
 import { repoRoot, fakeBin, materialize, materializeInto, withHostEnvAsync, withPathPrefix } from './util';
 

@@ -1,6 +1,10 @@
 /**
  * claude-code host reader.
  *
+ * Reader only — the writer (add/pin/remove) lives in
+ * src/hosts/claude-code-writer.ts so loading a reader never evaluates writer
+ * code (AGENTS.md: doctor is read-only by construction).
+ *
  * Real store layout (measured 2026-09-16, evidence in docs/hosts/claude-code.md):
  *   ~/.claude/plugins/installed_plugins.json   — {version:2, plugins:{"<name>@<marketplace>":
  *                                                   [{scope, installPath, version, gitCommitSha, …}]}
@@ -11,14 +15,14 @@
  * also writes a spec `mcp.json`; both are read, identical entries deduped —
  * spec §7.2.1 fixes the spec path as `mcp.json`).
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import type { HostReader, InstalledPlugin, McpServerEntry, PinOptions, PinOutcome } from '../host';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
 import { claudeCodeRoot, homeRoot } from '../paths';
-import { collectPluginServers, collectUserServers, pinPluginMcpFiles, readJson, type PluginMcpCandidate } from '../mcp';
+import { collectPluginServers, collectUserServers, readJson, type PluginMcpCandidate } from '../mcp';
 
 /** Where a plugin copy declares MCP servers (spec `mcp.json`, plus the `npx plugins` `.mcp.json` twin). */
-function mcpCandidates(): PluginMcpCandidate[] {
+export function mcpCandidates(): PluginMcpCandidate[] {
   return [
     { kind: 'spec', file: '.mcp.json' },
     { kind: 'spec', file: 'mcp.json' },
@@ -32,7 +36,7 @@ interface InstallRecordShape {
   gitCommitSha?: string;
 }
 
-function pluginsDir(): string {
+export function pluginsDir(): string {
   return join(claudeCodeRoot(), 'plugins');
 }
 
@@ -99,81 +103,4 @@ export const claudeCode: HostReader = {
     }
     return entries;
   },
-};
-
-import type { HostWriter, AddOptions } from '../host';
-import type { PluginSource, ResolvedSource } from '../source';
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-
-export const claudeCodeWriter: HostWriter = {
-  ...claudeCode,
-  async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void> {
-    const marketplace = plugin.marketplace || 'local';
-    const id = `${plugin.name}@${marketplace}`;
-    const targetDir = join(pluginsDir(), 'cache', marketplace, plugin.name, resolved.sha);
-    const regFile = join(pluginsDir(), 'installed_plugins.json');
-
-    if (opts?.dryRun) {
-      console.log(`[claude-code] would write directory: ${targetDir}`);
-      console.log(`[claude-code] would update registry: ${regFile}`);
-      return;
-    }
-
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-      cpSync(plugin.dir, targetDir, { recursive: true });
-    }
-
-    const pluginJson = join(targetDir, '.plugin', 'plugin.json');
-    const rootPluginJson = join(targetDir, 'plugin.json');
-    const sourceManifest = existsSync(pluginJson) ? pluginJson : existsSync(rootPluginJson) ? rootPluginJson : null;
-    
-    const targetPluginDir = join(targetDir, '.claude-plugin');
-    const targetPluginJson = join(targetPluginDir, 'plugin.json');
-    
-    if (sourceManifest && !existsSync(targetPluginJson)) {
-      mkdirSync(targetPluginDir, { recursive: true });
-      cpSync(sourceManifest, targetPluginJson);
-    }
-
-
-    let reg: any = { version: 2, plugins: {} };
-    if (existsSync(regFile)) {
-      try {
-        reg = JSON.parse(readFileSync(regFile, 'utf8'));
-      } catch {}
-    }
-    if (!reg.plugins) reg.plugins = {};
-    const now = new Date().toISOString();
-    
-    let existing = null;
-    if (Array.isArray(reg.plugins[id])) {
-      existing = reg.plugins[id].find((r: any) => r.scope === 'user');
-    }
-    
-    const entry = existing || { scope: 'user', installedAt: now };
-    entry.installPath = targetDir;
-    entry.version = resolved.sha;
-    entry.lastUpdated = now;
-    if (resolved.isGit) entry.gitCommitSha = resolved.sha;
-    
-    reg.plugins[id] = [entry];
-    mkdirSync(dirname(regFile), { recursive: true });
-    writeFileSync(regFile, JSON.stringify(reg, null, 2));
-  },
-  async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
-    if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
-    return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
-  },
-  async remove(id: string): Promise<void> {
-    const regFile = join(pluginsDir(), 'installed_plugins.json');
-    if (!existsSync(regFile)) return;
-    let reg: any;
-    try {
-      reg = JSON.parse(readFileSync(regFile, 'utf8'));
-    } catch { return; }
-    if (!reg.plugins || !reg.plugins[id]) return;
-    delete reg.plugins[id];
-    writeFileSync(regFile, JSON.stringify(reg, null, 2));
-  }
 };

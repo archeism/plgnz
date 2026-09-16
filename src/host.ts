@@ -3,9 +3,10 @@
  * implementing this interface; no host-specific branches outside its module).
  *
  * Split into `HostReader` and `HostWriter` so `doctor` is read-only *by
- * construction*: it takes `HostReader[]` and must never import a writer.
- * This phase ships readers only; `add`/`pin`/`update`/`remove` arrive later
- * and will implement `HostWriter` in the same per-host modules.
+ * construction*: it takes `HostReader[]` and must never import a writer. A
+ * module is evaluated whole, so each host's writer implements `HostWriter` in
+ * a sibling `<host>-writer.ts` module — loading the reader must not load the
+ * writer. test/doctor-imports.test.ts pins that split.
  */
 
 /** One MCP server as configured somewhere we can read it. */

@@ -1,6 +1,10 @@
 /**
  * codex host reader.
  *
+ * Reader only — the writer (add/pin/remove) lives in
+ * src/hosts/codex-writer.ts so loading a reader never evaluates writer code
+ * (AGENTS.md: doctor is read-only by construction).
+ *
  * Real store layout (measured 2026-09-16, evidence in docs/hosts/codex.md):
  *   ~/.codex/config.toml                          — [plugins."<name>@<marketplace>"] enabled = bool;
  *                                                    user-level [mcp_servers.<name>] (command/args
@@ -17,13 +21,13 @@
  * a plugin-provided server of the same name — see doctor check (2).
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, join, dirname } from 'node:path';
+import { basename, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import type { HostReader, InstalledPlugin, McpServerEntry, PinOptions, PinOutcome } from '../host';
+import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
 import { codexHome } from '../paths';
-import { collectPluginServers, pinPluginMcpFiles, type PluginMcpCandidate, type RawServerDef } from '../mcp';
+import { collectPluginServers, type PluginMcpCandidate, type RawServerDef } from '../mcp';
 
-function configFile(): string {
+export function configFile(): string {
   return join(codexHome(), 'config.toml');
 }
 
@@ -32,7 +36,7 @@ function configFile(): string {
  * a *pointer* (`"mcpServers": "./.mcp.json"`), never inline, so pinning it is a
  * no-op — the pointed file is a spec candidate here and is pinned directly.
  */
-function mcpCandidates(): PluginMcpCandidate[] {
+export function mcpCandidates(): PluginMcpCandidate[] {
   return [
     { kind: 'inline', manifest: join('.codex-plugin', 'plugin.json') },
     { kind: 'spec', file: '.mcp.json' },
@@ -141,86 +145,4 @@ export const codex: HostReader = {
     }
     return entries;
   },
-};
-
-import type { HostWriter, AddOptions } from '../host';
-import type { PluginSource, ResolvedSource } from '../source';
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-
-export const codexWriter: HostWriter = {
-  ...codex,
-  async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void> {
-    const marketplace = plugin.marketplace || 'local';
-    const id = `${plugin.name}@${marketplace}`;
-    const targetDir = join(codexHome(), 'plugins', 'cache', marketplace, plugin.name, resolved.sha);
-    const configPath = configFile();
-
-    if (opts?.dryRun) {
-      console.log(`[codex] would write directory: ${targetDir}`);
-      console.log(`[codex] would update config: ${configPath}`);
-      return;
-    }
-
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-      cpSync(plugin.dir, targetDir, { recursive: true });
-    }
-
-    const pluginJson = join(targetDir, '.plugin', 'plugin.json');
-    const rootPluginJson = join(targetDir, 'plugin.json');
-    const sourceManifest = existsSync(pluginJson) ? pluginJson : existsSync(rootPluginJson) ? rootPluginJson : null;
-    
-    const targetPluginDir = join(targetDir, '.codex-plugin');
-    const targetPluginJson = join(targetPluginDir, 'plugin.json');
-    
-    if (sourceManifest && !existsSync(targetPluginJson)) {
-      mkdirSync(targetPluginDir, { recursive: true });
-      cpSync(sourceManifest, targetPluginJson);
-    }
-
-
-    let toml = '';
-    if (existsSync(configPath)) {
-      toml = readFileSync(configPath, 'utf8');
-    }
-
-    let newToml = toml;
-    const header = `[plugins."${id}"]`;
-    const idx = toml.indexOf(header);
-    if (idx !== -1) {
-      const nextTable = toml.indexOf('\n[', idx + header.length);
-      const blockEnd = nextTable !== -1 ? nextTable : toml.length;
-      const block = toml.slice(idx, blockEnd);
-      if (block.includes('enabled = false')) {
-        const newBlock = block.replace('enabled = false', 'enabled = true');
-        newToml = toml.slice(0, idx) + newBlock + toml.slice(blockEnd);
-      } else if (!block.includes('enabled = true')) {
-        newToml = toml.slice(0, idx + header.length) + '\nenabled = true' + toml.slice(idx + header.length);
-      }
-    } else {
-      if (!newToml.endsWith('\n') && newToml.length > 0) newToml += '\n';
-      newToml += `[plugins."${id}"]\nenabled = true\n`;
-    }
-
-    mkdirSync(dirname(configPath), { recursive: true });
-    writeFileSync(configPath, newToml);
-  },
-  async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
-    if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
-    return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
-  },
-  async remove(id: string): Promise<void> {
-    const configPath = configFile();
-    if (!existsSync(configPath)) return;
-    const toml = readFileSync(configPath, 'utf8');
-    
-    const header = `[plugins."${id}"]`;
-    const idx = toml.indexOf(header);
-    if (idx !== -1) {
-      const nextTable = toml.indexOf('\n[', idx + header.length);
-      const blockEnd = nextTable !== -1 ? nextTable : toml.length;
-      const newToml = toml.slice(0, idx) + toml.slice(blockEnd);
-      writeFileSync(configPath, newToml);
-    }
-  }
 };

@@ -18,9 +18,10 @@
  */
 import type { HostWriter, InstalledPlugin } from './host';
 import type { Mark } from './doctor';
-import { writers as allWriters } from './hosts';
+import { writers as allWriters } from './hosts/writers';
 import { resolveSource, type PluginSource } from './source';
-import { readState, writeState, type InstallRecord } from './state';
+import { readState, type InstallRecord } from './state';
+import { writeState } from './state-write';
 
 export interface UpdateFinding {
   host: string;

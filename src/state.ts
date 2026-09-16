@@ -1,7 +1,8 @@
 /**
  * open-plugin's own install ledger — `$OPEN_PLUGIN_HOME/state.json`
- * (see src/paths.ts `stateFile()`). Written by `add` in a later phase;
- * doctor only reads it.
+ * (see src/paths.ts `stateFile()`). Readers only: doctor imports this module,
+ * so the writer (`writeState`) lives in src/state-write.ts — a module is
+ * evaluated whole, and doctor must not load writer code (AGENTS.md).
  *
  * Schema (version 1):
  * {
@@ -22,8 +23,7 @@
  * the source's bare `command`, so a recorded pin must be re-run on the fresh
  * copy. Absent means `pin` never rewrote anything for that install.
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { stateFile } from './paths';
 
 export interface InstallRecord {
@@ -82,11 +82,4 @@ export function readState(file: string = stateFile()): InstallRecord[] {
 /** Find the ledger row for one install on one host. */
 export function findRecord(records: InstallRecord[], host: string, id: string): InstallRecord | undefined {
   return records.find((r) => r.host === host && r.id === id);
-}
-
-export function writeState(records: InstallRecord[], file: string = stateFile()): void {
-  try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify({ version: 1, installs: records }, null, 2));
-  } catch {}
 }

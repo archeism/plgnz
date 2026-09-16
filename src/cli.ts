@@ -3,9 +3,11 @@
  * (AGENTS.md verbs list).
  */
 import { runDoctor, formatFinding, type DoctorFinding } from './doctor';
-import { hosts, writers } from './hosts';
+import { hosts } from './hosts';
+import { writers } from './hosts/writers';
 import { resolveSource } from './source';
-import { readState, writeState } from './state';
+import { readState } from './state';
+import { writeState } from './state-write';
 import type { InstallRecord } from './state';
 import { runPin } from './pin';
 import { runUpdate } from './update';

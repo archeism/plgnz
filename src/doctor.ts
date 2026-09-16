@@ -1,10 +1,11 @@
 /**
  * `open-plugin doctor` — read-only diagnosis.
  *
- * Read-only by construction: this module imports only host *readers*
- * (`HostReader`, src/hosts/index.ts), never a writer, and touches no file
- * except reading configs and running `git rev-parse` / `git ls-remote`
- * against recorded sources.
+ * Read-only by construction: this module imports only the readers-only host
+ * registry (src/hosts/index.ts) — no writer module loads with it — and
+ * touches no file except reading configs and running `git rev-parse` /
+ * `git ls-remote` against recorded sources. test/doctor-imports.test.ts
+ * walks this module's import graph and fails if a writer appears in it.
  *
  * Three checks (AGENTS.md contract):
  *  (1) command resolution — every stdio server in each host's native MCP

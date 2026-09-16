@@ -27,8 +27,9 @@
  */
 import type { HostWriter } from './host';
 import type { Mark } from './doctor';
-import { writers as allWriters } from './hosts';
-import { findRecord, readState, writeState, type InstallRecord } from './state';
+import { writers as allWriters } from './hosts/writers';
+import { findRecord, readState, type InstallRecord } from './state';
+import { writeState } from './state-write';
 
 export interface PinFinding {
   host: string;
