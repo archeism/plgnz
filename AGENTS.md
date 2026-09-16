@@ -10,7 +10,7 @@
 - `list`, `remove`, `targets`.
 
 ## Hosts (v0, native stores owned by this tool)
-claude-code · codex · kimi · cursor · omp (repo-root `.mcp.json`). Bare-MCP-config hosts (opencode, pi, gemini-cli, …) go through the `add-mcp` library API, not our own writers.
+claude-code · codex · kimi · cursor · omp (its own store under `~/.omp/plugins`, `omp plugin …`). Bare-MCP-config hosts (opencode, pi, gemini-cli, …) go through the `add-mcp` library API, not our own writers.
 
 ## Rules
 - Bun + TypeScript. `bun test` and `bun run check` must pass before any PR.
