@@ -40,5 +40,9 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
 
 ## Open
 
+- add-mcp documents `~/.kimi-code/mcp.json` as kimi's *global* MCP path
+  (readme-add-mcp.md, Kimi Code row); no such file exists on this machine, so
+  the reader does not parse it. Verify against kimi itself before wiring it
+  in — until then config.toml `[mcp_servers]` is the only user surface read.
 - Whether the plugins CLI's `originalSource` staging path can serve as a
   staleness source is not exploited in v0 (state.json is the only ledger).
