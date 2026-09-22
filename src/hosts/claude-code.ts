@@ -40,6 +40,19 @@ export function pluginsDir(): string {
   return join(claudeCodeRoot(), 'plugins');
 }
 
+/** An explicit Claude Code binary permits first install before its config root exists. */
+declare const Bun: { spawnSync(command: string[], options: { stdout: 'pipe'; stderr: 'pipe'; timeout: number }): { exitCode: number | null; stdout: Uint8Array } };
+
+export function hasCurrentClaudeCodeBinary(env: Record<string, string | undefined> = process.env): boolean {
+  const binary = env['OPEN_PLUGIN_CLAUDE_CODE_BIN'];
+  if (!binary || !existsSync(binary)) return false;
+  try {
+    const result = Bun.spawnSync([binary, '--version'], { stdout: 'pipe', stderr: 'pipe', timeout: 10_000 });
+    const stdout = [...result.stdout].map((byte) => String.fromCharCode(byte)).join('');
+    return result.exitCode === 0 && /^\d+\.\d+\.\d+ \(Claude Code\)\s*$/.test(stdout);
+  } catch { return false; }
+}
+
 function userConfigFile(): string {
   // The user-level config is `~/.claude.json` — a sibling of `~/.claude`, so
   // it follows OPEN_PLUGIN_HOME, not the per-host root override.
@@ -51,7 +64,7 @@ export const claudeCode: HostReader = {
   gui: false,
 
   detect(): boolean {
-    return existsSync(claudeCodeRoot());
+    return existsSync(claudeCodeRoot()) || hasCurrentClaudeCodeBinary();
   },
 
   stores(): string[] {
