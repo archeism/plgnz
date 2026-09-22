@@ -38,6 +38,8 @@ export interface InstalledPlugin {
   marketplace?: string;
   /** Install directory, when it exists on disk. */
   path?: string;
+  /** Every host-native root whose bytes participate in this active install. */
+  contentRoots?: Record<string, string>;
   version?: string;
   /** Source sha the host itself recorded (claude-code `gitCommitSha`), if any. */
   sha?: string;

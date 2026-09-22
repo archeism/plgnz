@@ -1,12 +1,17 @@
 /** Stable raw-byte tree fingerprint shared by source capture and read-only verification. */
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
+import type { InstalledPlugin } from './host';
 
 declare const Bun: {
   CryptoHasher: new (algorithm: 'sha256') => {
     update(input: string | Uint8Array): void;
     digest(encoding: 'hex'): string;
   };
+};
+
+declare const TextEncoder: {
+  new (): { encode(input?: string): Uint8Array };
 };
 
 export function fingerprintTree(root: string): string {
@@ -34,6 +39,36 @@ export function fingerprintTree(root: string): string {
   };
   walk(root, '');
   return hash.digest('hex');
+}
+
+/**
+ * Fingerprint the bytes that make an installation active for its host.
+ * Legacy hosts expose one native tree through `path`; multi-root hosts label
+ * every active root so their separate stores cannot silently escape proof.
+ */
+export function fingerprintInstallation(plugin: InstalledPlugin): string {
+  if (plugin.contentRoots === undefined) {
+    if (plugin.path === undefined) throw new Error('cannot fingerprint installation without a native path');
+    return fingerprintTree(plugin.path);
+  }
+  const roots = Object.entries(plugin.contentRoots).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  if (roots.length === 0) throw new Error('cannot fingerprint installation with no content roots');
+  const hash = new Bun.CryptoHasher('sha256');
+  for (const [label, root] of roots) {
+    if (label.length === 0) throw new Error('cannot fingerprint installation with an empty content root label');
+    if (!isAbsolute(root)) throw new Error(`content root '${label}' is not absolute: ${root}`);
+    const fingerprint = fingerprintTree(root);
+    frame(hash, label);
+    frame(hash, fingerprint);
+  }
+  return hash.digest('hex');
+}
+
+function frame(hash: InstanceType<typeof Bun.CryptoHasher>, value: string): void {
+  const bytes = new TextEncoder().encode(value);
+  const size = new Uint8Array([bytes.byteLength >>> 24, bytes.byteLength >>> 16, bytes.byteLength >>> 8, bytes.byteLength]);
+  hash.update(size);
+  hash.update(bytes);
 }
 
 function readBytes(path: string): Uint8Array {

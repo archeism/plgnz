@@ -17,7 +17,7 @@ import { cursor } from '../src/hosts/cursor';
 import { omp } from '../src/hosts/omp';
 import type { HostReader } from '../src/host';
 import { commitAll, initGitRepo, materialize, repoRoot, withHostEnv, writeLedger } from './util';
-import { fingerprintTree } from '../src/fingerprint';
+import { fingerprintInstallation, fingerprintTree } from '../src/fingerprint';
 
 function marks(result: { findings: DoctorFinding[] }): string {
   return result.findings.map((f) => f.mark).join('');
@@ -310,6 +310,37 @@ describe('doctor · CLI', () => {
 });
 
 describe('doctor · output shape', () => {
+  test('content proof fingerprints every declared active root while legacy installs keep their tree fingerprint', () => {
+    const source = mkdtempSync(join(tmpdir(), 'plgnz-doctor-source-'));
+    const privateRoot = mkdtempSync(join(tmpdir(), 'plgnz-doctor-private-'));
+    const skillsRoot = mkdtempSync(join(tmpdir(), 'plgnz-doctor-skills-'));
+    const commandsRoot = mkdtempSync(join(tmpdir(), 'plgnz-doctor-commands-'));
+    writeFileSync(join(source, 'source.txt'), 'source');
+    const roots = { private: privateRoot, skills: skillsRoot, commands: commandsRoot };
+    for (const [label, root] of Object.entries(roots)) writeFileSync(join(root, `${label}.txt`), label);
+    const native = { id: 'multi-root', name: 'multi-root', enabled: true, path: privateRoot, contentRoots: roots };
+    const host: HostReader = {
+      id: 'multi-root-host', gui: false, detect: () => true, stores: () => [], mcpEntries: () => [], listInstalled: () => [native],
+    };
+    const record = { host: host.id, id: native.id, source, sourceSha: 'local', sourceDir: source,
+      fingerprint: fingerprintTree(source), installedFingerprint: fingerprintInstallation(native), ownership: 'plgnz' as const };
+    const content = (): DoctorFinding => runDoctor([host], [record]).findings.find((finding) => finding.check === 'content')!;
+
+    expect(fingerprintInstallation({ id: 'legacy', name: 'legacy', path: privateRoot })).toBe(fingerprintTree(privateRoot));
+    expect(content().mark).toBe('✓');
+    for (const [label, root] of Object.entries(roots)) {
+      writeFileSync(join(root, `${label}.txt`), `${label}-tampered`);
+      expect(content().mark).toBe('✗');
+      writeFileSync(join(root, `${label}.txt`), label);
+      expect(content().mark).toBe('✓');
+      rmSync(root, { recursive: true, force: true });
+      expect(content().mark).toBe('✗');
+      mkdirSync(root);
+      writeFileSync(join(root, `${label}.txt`), label);
+      expect(content().mark).toBe('✓');
+    }
+  });
+
   test('content proof detects source drift, refresh, installed tampering, and deletion', () => {
     const source = mkdtempSync(join(tmpdir(), 'plgnz-doctor-source-'));
     const installed = mkdtempSync(join(tmpdir(), 'plgnz-doctor-installed-'));

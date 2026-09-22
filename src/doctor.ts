@@ -36,7 +36,7 @@ import type { HostReader, McpServerEntry } from './host';
 import { hosts as allHosts } from './hosts';
 import { findRecord, readState, type InstallRecord } from './state';
 import { expandRootPlaceholders, gitHead, gitRemoteHead, isExecutableFile, isGitUrl, resolveCommandPath, which } from './exec';
-import { fingerprintTree } from './fingerprint';
+import { fingerprintInstallation, fingerprintTree } from './fingerprint';
 
 export type Mark = '✓' | '✗' | '!';
 
@@ -81,7 +81,7 @@ function checkContent(host: HostReader, state: InstallRecord[], out: DoctorFindi
       continue;
     }
     let nativeFingerprint: string;
-    try { nativeFingerprint = fingerprintTree(native.path); }
+    try { nativeFingerprint = fingerprintInstallation(native); }
     catch (error) {
       out.push(contentFinding(host.id, record.id, '✗', `install '${record.id}' native content cannot be verified — ${(error as Error).message}`));
       continue;

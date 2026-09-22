@@ -11,7 +11,7 @@ import { writeState } from './state-write';
 import type { InstallRecord } from './state';
 import { runPin } from './pin';
 import { runUpdate } from './update';
-import { fingerprintTree } from './fingerprint';
+import { fingerprintInstallation } from './fingerprint';
 import type { HostReader, InstallOutcome } from './host';
 import { consumerProfiles, findConsumerProfile, type ConsumerProfile } from './consumer-profiles';
 import { CompatibilityError, requireCompatible } from './compatibility';
@@ -379,7 +379,7 @@ export async function main(argv: string[]): Promise<number> {
               sourceSha: resolved.sha,
               installedAt: new Date().toISOString(),
               sourceDir: plugin.dir,
-              installedFingerprint: fingerprintTree(match.path),
+              installedFingerprint: fingerprintInstallation(match),
               ...(plugin.contentFingerprint !== undefined ? { fingerprint: plugin.contentFingerprint } : {}),
             };
             delete finalized.pending;

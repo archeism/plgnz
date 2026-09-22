@@ -22,7 +22,7 @@ import { writers as allWriters } from './hosts/writers';
 import { resolveSource, type PluginSource } from './source';
 import { readState, type InstallRecord } from './state';
 import { writeState } from './state-write';
-import { fingerprintTree } from './fingerprint';
+import { fingerprintInstallation } from './fingerprint';
 import { CompatibilityError } from './compatibility';
 
 export interface UpdateFinding {
@@ -173,7 +173,7 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
         installedAt: new Date().toISOString(),
         ownership: record.ownership ?? 'plgnz',
         sourceDir: plugin.dir,
-        installedFingerprint: fingerprintTree(installed.path),
+        installedFingerprint: fingerprintInstallation(installed),
         ...(plugin.contentFingerprint !== undefined ? { fingerprint: plugin.contentFingerprint } : {}),
       };
       delete finalized.pending;
