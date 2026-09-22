@@ -1,0 +1,55 @@
+{
+  "date": "2026-09-22",
+  "surface": "isolated direct import of Pi loadSkills and formatSkillsForPrompt; no CLI, model, or real Pi home",
+  "package": {
+    "name": "@earendil-works/pi-coding-agent",
+    "version": "0.80.10",
+    "skillsModule": "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js",
+    "explicitExpansionSource": "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js:_expandSkillCommand"
+  },
+  "fixture": "agent/skills/market___demo/{skills/{ordinary,manual},resources}",
+  "discovered": {
+    "demo-ordinary": {
+      "disableModelInvocation": false,
+      "filePath": "agent/skills/market___demo/skills/ordinary/SKILL.md",
+      "baseDir": "agent/skills/market___demo/skills/ordinary"
+    },
+    "demo-manual": {
+      "disableModelInvocation": true,
+      "filePath": "agent/skills/market___demo/skills/manual/SKILL.md",
+      "baseDir": "agent/skills/market___demo/skills/manual"
+    }
+  },
+  "diagnostics": [],
+  "ordinaryInAutomaticCatalog": true,
+  "manualInAutomaticCatalog": false,
+  "manualAvailableForExplicitLookup": true,
+  "resourcePaths": {
+    "sibling": "agent/skills/market___demo/skills/manual/shared.txt",
+    "plugin": "agent/skills/market___demo/resources/value.txt"
+  },
+  "scope": "The loader proved recursive discovery, generated names, policy filtering, and parent paths. Pi's installed _expandSkillCommand source performs the explicit lookup and expansion; no cloud/model request was made.",
+  "addy_command_projection": {
+    "source": "/tmp/plgnz-native-proof/bundle/plugins/addy",
+    "projector": "projectPluginForPi",
+    "total": 34,
+    "ordinary": 25,
+    "manual": 9,
+    "manualInAutomaticCatalog": false,
+    "plan": {
+      "baseDir": "agent/skills/personal___addy/skills/plan",
+      "explicitTailSyntax": "/skill:addy-plan tail"
+    },
+    "diagnostics": []
+  },
+  "addy_native_expansion": {
+    "surface": "AgentSession.prototype._expandSkillCommand.call with a minimal resourceLoader receiver",
+    "input": "/skill:addy-build review this change",
+    "expanded": true,
+    "includesCommandBody": true,
+    "includesTail": true,
+    "referencesNestedParent": true,
+    "disabledStillExpanded": true,
+    "scope": "Direct installed Pi method invocation over an isolated projected package; no CLI, model, cloud, or real Pi home."
+  }
+}

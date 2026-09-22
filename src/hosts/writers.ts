@@ -9,5 +9,6 @@ import { codexWriter } from './codex-writer';
 import { kimiWriter } from './kimi-writer';
 import { cursorWriter } from './cursor-writer';
 import { ompWriter } from './omp-writer';
+import { piWriter } from './pi-writer';
 
-export const writers: HostWriter[] = [claudeCodeWriter, codexWriter, kimiWriter, cursorWriter, ompWriter];
+export const writers: HostWriter[] = [claudeCodeWriter, codexWriter, kimiWriter, cursorWriter, ompWriter, piWriter];

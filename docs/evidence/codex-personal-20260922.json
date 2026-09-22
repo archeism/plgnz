@@ -23,11 +23,37 @@
   "scope": "Codex discovery and explicit instruction loading, not autonomous execution of the build skill or another harness",
   "skill_decision": "Operating skills unchanged; independent review and native transcript checks caught and corrected implementation defects. No skill-improvement or cost-reduction claim.",
   "resources": "Peak memory and CPU not measured",
-  "evidence_local": "/tmp/plgnz-native-proof",
+  "evidence_local": "/Users/chaz/.local/share/personal/evidence/plgnz-codex-20260922",
   "build_skill_sha256": "958253c9b451d8bfb84319526ae25ae66cbca2a1f88296c5551c294c0d5d6ec9",
   "conversion_source_sha256": "8b736053043b35b20b8e120bad6feaee8d26aa07fe9498d55697b2d078d39bf1",
   "operating_skill_sha256": {
     "agent-orchestration": "ef299e02fcc98ee34edab93d0bbf752c9ae142dd6f44c792b5d52788c94dfefc",
     "rsi-loop": "138123efea0acd845618ac8714c506136870642d4fcaab648341cdc170e2463f"
+  },
+  "resource_resolution_probe": {
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "low",
+    "argument": "auto",
+    "files_read": [
+      "skills/incremental-implementation/SKILL.md",
+      "agents/test-engineer.md"
+    ],
+    "headings": [
+      "# Incremental Implementation",
+      "# Test Engineer"
+    ],
+    "command_exit_codes": [
+      0,
+      0
+    ],
+    "usage": {
+      "input_tokens": 61072,
+      "cached_input_tokens": 49408,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 446,
+      "reasoning_output_tokens": 46
+    },
+    "elapsed_seconds": null,
+    "scope": "Actual read-only Codex tool execution resolved sibling skill and persona resources; no build execution or edits."
   }
 }

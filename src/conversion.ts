@@ -47,7 +47,7 @@ export function projectPluginForCodex(sourceDir: string, destinationDir: string)
     const commands = discoverCommands(source);
     validateClaudeNativeSemantics(source, commands);
     const namespace = readPackageName(source);
-    for (const command of commands) writeCommandSkill(stage, command, namespace, new Set(commands.map(item => item.name)));
+    for (const command of commands) { if (command.userInvocable === false) throw new Error(`user-invocable: false is unsupported by Codex: ${command.source}`); writeCommandSkill(stage, command, namespace, new Set(commands.map(item => item.name))); }
     translateNativeSkillPolicies(stage);
     publishStage(stage, destination);
   } catch (error) {
@@ -150,10 +150,32 @@ function commandFrom(path: string, description: string, argumentHint: unknown, u
   if (!validSegment(name)) throw new Error(`unsafe command name: ${name}`);
   if (argumentHint !== undefined && typeof argumentHint !== 'string') throw new Error(`argument hint must be text: ${path}`);
   if (userInvocable !== undefined && typeof userInvocable !== 'boolean') throw new Error(`user-invocable must be boolean: ${path}`);
-  if (userInvocable === false) throw new Error(`user-invocable: false is unsupported by Codex: ${path}`);
   if (disableModelInvocation !== undefined && typeof disableModelInvocation !== 'boolean') throw new Error(`disable-model-invocation must be boolean: ${path}`);
   if (/!`[\s\S]*?`/u.test(body)) throw new Error(`shell preprocessing is unsupported: ${path}`);
-  return { name, description, ...(typeof argumentHint === 'string' ? { argumentHint } : {}), ...(userInvocable === true ? { userInvocable } : {}), allowImplicit: disableModelInvocation === false, body, source: path };
+  return { name, description, ...(typeof argumentHint === 'string' ? { argumentHint } : {}), ...(typeof userInvocable === 'boolean' ? { userInvocable } : {}), allowImplicit: disableModelInvocation === false, body, source: path };
+}
+
+/** Pi projector: reuse the shared command parser, but emit Pi's native skill form. */
+export function projectPluginForPi(sourceDir: string, destinationDir: string, namespace: string): void {
+  const source = resolve(sourceDir); const destination = resolve(destinationDir);
+  if (!existsSync(source) || !statSync(source).isDirectory()) throw new Error(`plugin source is not a directory: ${source}`);
+  if (destination === source || destination.startsWith(`${source}/`)) throw new Error('destination must not be inside the plugin source');
+  assertSafeTree(source); mkdirSync(destination, { recursive: true });
+  if (readdirSync(destination).length !== 0) throw new Error(`Pi projection destination must be empty: ${destination}`);
+  cpSync(source, destination, { recursive: true });
+  const commands = discoverCommands(source); const names = new Set(commands.map(command => command.name));
+  for (const command of commands) writePiCommandSkill(destination, command, namespace, names);
+}
+
+function writePiCommandSkill(stage: string, command: Command, namespace: string, names: Set<string>): void {
+  if (command.userInvocable === false) throw new Error(`user-invocable: false has no proven Pi skill equivalent: ${command.source}`);
+  const skillDir = join(stage, 'skills', command.name);
+  if (existsSync(skillDir)) throw new Error(`collision: command ${command.name} would replace an existing skill`);
+  const body = command.body
+    .replace(/\$ARGUMENTS\b/gu, 'the text after this /skill invocation')
+    .replace(/(^|[^A-Za-z0-9_-])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,:;!?])/giu, (whole, prefix: string, name: string) => names.has(name) ? `${prefix}/skill:${namespace}-${name}` : whole);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, 'SKILL.md'), `---\nname: ${namespace}-${command.name}\ndescription: ${yamlString(command.description)}\ndisable-model-invocation: true\n---\n\nUse the text after this /skill invocation as command arguments; no text means empty arguments. Relative paths remain relative to this skill directory.\n\n${body}`);
 }
 
 function validateMetadata(metadata: Record<string, unknown>, path: string): void {
