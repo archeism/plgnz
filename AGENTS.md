@@ -9,15 +9,16 @@
 - `update [name]` — idempotent re-`add` from the recorded `state.json` source; re-materializes copy-based hosts and re-applies recorded pins. Never modifies a plugin with no record — reports it instead.
 - `list`, `remove`, `targets`.
 
-## Hosts (v0, native stores owned by this tool)
-claude-code · codex · kimi · cursor · omp (its own store under `~/.omp/plugins`, `omp plugin …`). Bare-MCP-config hosts (opencode, pi, gemini-cli, …) go through the `add-mcp` library API, not our own writers.
+## Hosts and approved scope
+The current implemented native adapters are claude-code, codex, kimi, cursor, and omp. The approved milestone scope is the 16 current Personal plugin and standalone plugin-skill routes documented in `SPEC.md`; each additional route requires its own evidence-backed adapter or visible unsupported/unverified result. Bare-MCP configuration remains the separate `add-mcp` API boundary, not a claim that those 16 routes are already implemented.
 
 ## Rules
-- Bun + TypeScript. `bun test` and `bun run check` must pass before any PR.
+- Bun + TypeScript. Run the relevant focused check for each increment and save its command/result; run `bun test` and `bun run check` before a direct push to `main`. Direct pushes are the authorized integration path; do not create a PR unless later directed.
 - One module per host under `src/hosts/<host>.ts`, all implementing the `Host` interface in `src/host.ts`. No host-specific branches outside its module.
 - Tests never touch the real home directory: every path is resolved through `src/paths.ts`, which honours `OPEN_PLUGIN_HOME` (tests point it at a temp dir with fixture stores).
 - `doctor` is read-only by construction — it must not import any writer.
 - Every spec claim in code or docs cites the section (`spec §7.2.1`). Spec: https://agentplugins.org (Agent Plugins Specification 1.0.0).
-- Commit history is an asset: never squash, never squash-merge. Work via PRs into `main`.
+- Commit history is an asset: never squash. Work in small verified commits and push directly to `main` when authorized.
+- While the package is `0.0.x`, published version changes are patch-only. npm publication and fleet rollout require separate authorization.
 - `CLAUDE.md` is a symlink to this file; do not maintain a second copy.
 - Research and decisions live in `docs/`; this file is rules only.

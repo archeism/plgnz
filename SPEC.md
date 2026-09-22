@@ -1,0 +1,82 @@
+# Spec: one plugin distributor — plgnz
+
+Status: approved for the milestone implementation. Source pushes are authorized for verified work; npm publication and fleet rollout remain separately authorized.
+
+Personal prepares the plugins; plgnz distributes them. The same `add` command accepts a GitHub/Git source or a local package/collection, adapts it for the selected harness, installs it, and verifies the installation. Personal calls that command instead of maintaining a second distributor.
+
+## Objective and ownership
+
+Serve plugin authors and users across harnesses; Personal is the first production consumer and dogfood case. Eliminate the observed drift between Personal's richer local deployment and Open Plugin's separate installers.
+
+| Owner | Responsibility |
+| --- | --- |
+| Personal | Adoption, vendor pins/provenance, house metadata, renaming/namespaces, bundling, target selection, and non-plugin setup (global instructions, indexes, machine configuration). It vendors and may amend upstream skill bytes; those amended canonical bytes and their provenance are its authority. |
+| plgnz | Source resolution, harness capability profiles, command/skill conversion, resource packaging, native installation, content refresh, owned cleanup, installation records, and read-only verification. |
+
+Personal must invoke the same public CLI available to other users. Its local bundled tree is a first-class `add` source, not an instruction to fetch a pristine upstream replacement; plgnz must never overwrite Personal's amended bytes or provenance on refresh. No Personal-specific runtime dependency or Addy special case belongs in plgnz. Port verified behavior and tests from Personal, not its entire implementation. Remove migrated Personal installers and harness-specific projections after parity passes; do not retain an active fallback distributor.
+
+## Public interface
+
+Proposed interface (not a claim that every option already exists):
+
+```sh
+npx plgnz add owner/repo --target codex
+npx plgnz add https://github.com/owner/repo.git --target codex
+npx plgnz add ./dist/plugins --target codex --json
+npx plgnz add ./dist/plugins --target codex --dry-run --json
+npx plgnz update --target codex --json
+npx plgnz list --target codex --json
+npx plgnz remove <installed-id> --target codex --json
+npx plgnz doctor --target codex --json
+```
+
+- `add` accepts a plugin directory, local collection/marketplace, or remote source. Repeating it reconciles that source's selected installations, including changed local bytes without a version/commit bump. `update` reuses recorded sources and selections.
+- Missing sources, zero discovered packages, unknown/absent requested targets, collisions and incompatible conversions cannot report success.
+- `--json` emits structured per-package/per-target outcomes and diagnostics; automation uses these plus a nonzero exit status for required failures. Logs go to stderr. Dry-run must not alter active installs/configuration.
+- Personal bundles once, then invokes `add` with its chosen local source and targets; the pinned CLI version is explicit. Local development can invoke that same CLI from the checkout without an npm release. Remote refresh applies only to a source explicitly supplied as remote.
+- Preserve established marketplace/plugin identity during migration so previously installed packages are refreshed, not duplicated. Remove only recorded/verified owned artifacts; never remove unrelated user configuration.
+
+## Compatibility and lifecycle requirements
+
+1. A consumer profile identifies harness, surface/loader, applicable versions, capabilities and evidence. CLI, desktop and ACP are not assumed equivalent.
+2. Accept existing Markdown/TOML prompt commands and skill directories. Preserve explicit invocation restrictions, names, descriptions, supported arguments, sibling references and plugin-owned resources. Commands and user-only skills may map into each other's native form when semantics are equivalent. Ordinary skills retain automatic discovery.
+3. Do not substitute prose for unsupported executable handlers, permission semantics or template preprocessing. Report unsupported or unverified requirements before replacing the affected plugin. Never silently strip user-only restrictions or install a partial dependency set as a success.
+4. Stage and validate each plugin/target before activation. A failed conversion retains its working installation; updates remove obsolete owned representations. Report partial multi-target outcomes honestly; no global transaction is promised.
+5. Reuse native loaders/installers where appropriate and verify installed content. No simultaneous plugin and standalone skill delivery for the same content. `doctor` remains read-only; it distinguishes installed-content checks from actual runtime conformance evidence.
+6. Freeze the consumer scope from Personal HEAD `610c4e47cfb7750aa1da4221754eaafb76dc974c`: the eleven `PLUGIN_HOSTS` routes (`claude-code`, `codex`, `omp`, `dcode`, `hermes`, `openclaw`, `grok`, `kimi`, `zcode-cli`, `zcode-desktop`, `cursor`) plus five current standalone plugin-skill routes (`opencode`, `pi`, `gemini-cli`, `factory`, `grokbot`). Every migrated route needs matching lifecycle coverage and an evidence-backed supported/unsupported/unverified result. Unknown is not success. Unsupported cases must be visible, never silently weakened; unresolved required parity blocks removal of that route's existing implementation and completion of this consolidation. This is an OSS harness scope, not an operating-system expansion.
+
+## Structure, stack and style
+
+Bun + TypeScript, existing repository conventions. plgnz's `src/source.ts` and CLI own generic orchestration; `src/hosts/` owns consumer profiles/adapters and native lifecycle behavior; shared conversion logic has no Personal imports. Tests remain under `test/`. Personal retains its house bundler and replaces installation branches with one CLI client in `src/cli/`; its tests stay under `tests/`.
+
+Prefer small explicit interfaces and existing modules; no new daemon, agent framework or mandatory replacement authoring manifest. Example outcome shape to finalize with the CLI contract:
+
+```ts
+type InstallOutcome = {
+  plugin: string;
+  target: string;
+  status: 'installed' | 'unchanged' | 'unsupported' | 'unverified' | 'failed';
+  diagnostic?: string;
+};
+```
+
+Before CLI/source/conversion/adapter implementation, inspect the pinned source and command surface of `vercel-labs/skills` and `neon-solutions/add-mcp`, then record an adopt/reject rationale. The current decision is in `docs/research/prior-art-2026-09-22.md`; the frozen worker interface is `docs/implementation-contract.md`. Reuse only a proven fitting surface; do not copy a feature set, add an OS/harness, or make an add-on manifest mandatory. `add-mcp` remains a separate API boundary unless a separately approved contract changes that.
+
+## Verification and completion
+
+Existing plgnz gates: `bun run check` and `bun test`. Personal's full gate: `bun run check`; distinguish pre-existing unrelated failures from regressions.
+
+- Public CLI integration tests use isolated homes, not production agent configuration. Local and Git fixtures traverse the same install pipeline.
+- Exercise install → unchanged re-add → changed local content at the same version → representation migration → failed update → removal. Assert active content, ownership and preservation of unrelated configuration.
+- Prove command/skill semantics through real loaders/transcripts: ordinary discovery works, user-only entries are excluded from automatic discovery, explicit invocation loads the correct body and arguments, and references/resources resolve. A copied file or plausible model answer alone is insufficient.
+- Addy's nine commands and 25 skills are the first real case. Preserve the verified Codex behavior and regression for `tasks/plan.md`; then exercise the remaining claimed harness routes. One harness per worker; cheaper bounded workers, independent review, coordinator acceptance.
+- Run `personal deploy` through the plgnz CLI and verify the resulting native installations. Completion requires deleting the replaced Personal distribution implementations, not merely adding an optional call to plgnz.
+- Save successful and failed attempts, versions, configuration, transcripts, elapsed time and available usage/resource evidence. Record unknown measurements honestly. Apply RSI only to demonstrated substrate misses; an unchanged operating skill is a valid result.
+
+## Boundaries and naming
+
+Always preserve unrelated working-tree changes and user configuration; commit logical tested increments. Direct push to `main` is authorized for verified work; do not use PR-only or squash workflow. No npm publication, remote repository rename, or fleet rollout is in scope. While the version is `0.0.x`, any published version change is patch-only. Further changes to product scope require review.
+
+Use **plgnz** for public branding, npm package and command. GitHub repository: `archeism/plgnz` (rename approved by Charles). Generic plugin standards remain distinct from our product name.
+
+This document is the shared source of requirements for both repositories; Personal should link to its approved revision rather than maintain a divergent second spec.
