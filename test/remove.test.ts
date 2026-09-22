@@ -10,6 +10,7 @@ import { cursor } from '../src/hosts/cursor';
 import { kimi } from '../src/hosts/kimi';
 import { omp } from '../src/hosts/omp';
 import { readState } from '../src/state';
+import { withKimiNative } from './kimi-fixture';
 
 const pluginsMap = {
   'plugin.json': JSON.stringify({ name: "demo-plugin", mcpServers: { demo: { command: "demo" } } }, null, 2),
@@ -68,8 +69,9 @@ describe('remove', () => {
     });
   });
 
-  test('kimi > removes plugin from registry', async () => {
+  test('kimi > removes plugin from the active registry through native lifecycle', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
       initGitRepo(sourceDir, pluginsMap);
       await main(['add', sourceDir, '--target', 'kimi']);
@@ -79,6 +81,7 @@ describe('remove', () => {
 
       const installed = kimi.listInstalled();
       expect(installed.find(p => p.id === 'demo-plugin')).toBeUndefined();
+      });
     });
   });
 

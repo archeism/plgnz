@@ -23,10 +23,13 @@ import { resolveSource, type PluginSource } from './source';
 import { readState, type InstallRecord } from './state';
 import { writeState } from './state-write';
 import { fingerprintTree } from './fingerprint';
+import { CompatibilityError } from './compatibility';
 
 export interface UpdateFinding {
   host: string;
   mark: Mark;
+  /** A typed adapter refusal keeps its public InstallOutcome status. */
+  status?: 'unsupported' | 'unverified';
   message: string;
 }
 
@@ -143,11 +146,9 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
       }
       await host.add(plugin, resolved, { dryRun: options.dryRun });
     } catch (e) {
-      findings.push({
-        host: host.id,
-        mark: '✗',
-        message: `re-add of '${record.id}' failed — ${(e as Error).message}`,
-      });
+      findings.push(e instanceof CompatibilityError
+        ? { host: host.id, mark: e.status === 'unverified' ? '!' : '✗', status: e.status, message: `re-add of '${record.id}' refused — ${e.message}` }
+        : { host: host.id, mark: '✗', message: `re-add of '${record.id}' failed — ${(e as Error).message}` });
       continue;
     }
     let pinsOk: boolean;
@@ -185,7 +186,7 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
     }
   }
 
-  return { findings, exitCode: findings.some((f) => f.mark === '✗') ? 1 : 0 };
+  return { findings, exitCode: findings.some((f) => f.mark === '✗' || f.status === 'unverified') ? 1 : 0 };
 }
 
 /** Re-apply the pins recorded for this install onto the freshly added copy. */

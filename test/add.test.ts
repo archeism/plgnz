@@ -13,6 +13,10 @@ import { kimi } from '../src/hosts/kimi';
 import { cursor } from '../src/hosts/cursor';
 import { omp } from '../src/hosts/omp';
 import { runDoctor } from '../src/doctor';
+import { writers } from '../src/hosts/writers';
+import type { HostWriter } from '../src/host';
+import { CompatibilityError } from '../src/compatibility';
+import { withKimiNative } from './kimi-fixture';
 
 const pluginsMap = {
   'plugin.json': JSON.stringify({ name: "new-plugin", mcpServers: { demo: { command: "demo" } } }, null, 2),
@@ -61,6 +65,7 @@ describe('add', () => {
 
   test('kimi > writes registry and copies files', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
       initGitRepo(sourceDir, pluginsMap);
       
@@ -72,6 +77,7 @@ describe('add', () => {
 
       const state = readState();
       expect(state.find(r => r.id === 'new-plugin' && r.host === 'kimi') !== undefined).toBe(true);
+      });
     });
   });
 
@@ -168,6 +174,24 @@ describe('add', () => {
     });
   });
 
+  test('rejects a name outside the frozen target inventory before source or native writes', async () => {
+    await withHostEnvAsync('codex', async () => {
+      const before = codex.listInstalled().map((plugin) => plugin.id);
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['add', '/not/read', '--target', 'not-a-target', '--json'])).toBe(2);
+      } finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; diagnostic?: string }>;
+      expect(outcomes[0]?.target).toBe('not-a-target');
+      expect(outcomes[0]?.status).toBe('failed');
+      expect(outcomes[0]?.diagnostic).toContain("unknown target 'not-a-target'");
+      expect(readState()).toEqual([]);
+      expect(codex.listInstalled().map((plugin) => plugin.id)).toEqual(before);
+    });
+  });
+
   test('selects one plugin from a marketplace and rejects unknown selectors before writing', async () => {
     await withHostEnvAsync('codex', async () => {
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-marketplace-'));
@@ -225,6 +249,97 @@ describe('add', () => {
     });
   });
 
+  test('reports a declared target with no active adapter as unverified without mutation', async () => {
+    await withHostEnvAsync('codex', async () => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+      initGitRepo(sourceDir, pluginsMap);
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['add', sourceDir, '--target', 'hermes', '--json'])).toBe(1);
+      } finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ plugin: string; target: string; status: string; action: string; dryRun: boolean; diagnostic?: string }>;
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]?.plugin).toBe('new-plugin');
+      expect(outcomes[0]?.target).toBe('hermes');
+      expect(outcomes[0]?.status).toBe('unverified');
+      expect(outcomes[0]?.action).toBe('install');
+      expect(outcomes[0]?.dryRun).toBe(false);
+      expect(outcomes[0]?.diagnostic).toContain('unverified for install');
+      expect(readState()).toEqual([]);
+      expect(codex.listInstalled().find((plugin) => plugin.name === 'new-plugin')).toBeUndefined();
+    });
+  });
+
+  test('refuses an explicitly selected unverified adapter without mutation', async () => {
+    await withHostEnvAsync('codex', async () => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+      initGitRepo(sourceDir, pluginsMap);
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['add', sourceDir, '--target', 'gemini-cli', '--json'])).toBe(1);
+      } finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ plugin: string; target: string; status: string; action: string; dryRun: boolean; diagnostic?: string }>;
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]?.plugin).toBe('new-plugin');
+      expect(outcomes[0]?.target).toBe('gemini-cli');
+      expect(outcomes[0]?.status).toBe('unverified');
+      expect(outcomes[0]?.action).toBe('install');
+      expect(outcomes[0]?.dryRun).toBe(false);
+      expect(outcomes[0]?.diagnostic).toContain('unverified for install');
+      expect(readState()).toEqual([]);
+      expect(codex.listInstalled().find((plugin) => plugin.name === 'new-plugin')).toBeUndefined();
+    });
+  });
+
+  test('does not start a supported target when another selected target is unverified', async () => {
+    await withHostEnvAsync('codex', async () => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+      initGitRepo(sourceDir, pluginsMap);
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['add', sourceDir, '--target', 'codex', '--target', 'hermes', '--json'])).toBe(1);
+      } finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string }>;
+      expect(outcomes.find((outcome) => outcome.target === 'hermes')?.status).toBe('unverified');
+      expect(outcomes.find((outcome) => outcome.target === 'codex')?.status).toBe('failed');
+      expect(readState()).toEqual([]);
+      expect(codex.listInstalled().find((plugin) => plugin.name === 'new-plugin')).toBeUndefined();
+    });
+  });
+
+  test('preserves a writer compatibility refusal in the add outcome', async () => {
+    await withHostEnvAsync('codex', async () => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+      initGitRepo(sourceDir, pluginsMap);
+      const originalWriters = [...writers];
+      const refusing: HostWriter = {
+        id: 'codex', gui: false, detect: () => true, stores: () => [], listInstalled: () => [], mcpEntries: () => [],
+        add: async () => { throw new CompatibilityError('codex', 'install', 'unsupported', 'test evidence'); },
+        remove: async () => {}, pin: async () => ({ changes: [], refusals: [] }),
+      };
+      const output: string[] = [];
+      const originalLog = console.log;
+      writers.splice(0, writers.length, refusing);
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['add', sourceDir, '--target', 'codex', '--json'])).toBe(1);
+      } finally {
+        writers.splice(0, writers.length, ...originalWriters);
+        console.log = originalLog;
+      }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; diagnostic?: string }>;
+      expect(outcomes[0]?.target).toBe('codex');
+      expect(outcomes[0]?.status).toBe('unsupported');
+      expect(outcomes[0]?.diagnostic).toContain('unsupported for install');
+    });
+  });
+
   test('does not mutate a host when pending intent cannot be persisted', async () => {
     await withHostEnvAsync('codex', async (home) => {
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
@@ -271,7 +386,7 @@ describe('add', () => {
     expect(outcomes.find((outcome) => outcome.target === 'cursor')?.diagnostic).toContain('not attempted');
   });
 
-  test('actual CLI fails cleanly when no writer target is detected', () => {
+  test('actual CLI ignores absent unverified adapters and fails cleanly when no writer target is detected', () => {
     const home = mkdtempSync(join(tmpdir(), 'open-plugin-empty-home-'));
     const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
     initGitRepo(sourceDir, pluginsMap);

@@ -35,6 +35,7 @@ export function pluginsDir(): string {
  */
 export function mcpCandidates(): PluginMcpCandidate[] {
   return [
+    { kind: 'inline', manifest: 'kimi.plugin.json' },
     { kind: 'inline', manifest: join('.kimi-plugin', 'plugin.json') },
     { kind: 'spec', file: '.mcp.json' },
     { kind: 'spec', file: 'mcp.json' },

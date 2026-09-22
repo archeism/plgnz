@@ -16,6 +16,8 @@ import { join } from 'node:path';
 import { runPin } from '../src/pin';
 import { cursorWriter } from '../src/hosts/cursor-writer';
 import { kimiWriter } from '../src/hosts/kimi-writer';
+import { kimi } from '../src/hosts/kimi';
+import { runDoctor } from '../src/doctor';
 import { readState } from '../src/state';
 import { repoRoot, fakeBin, materialize, materializeInto, withHostEnvAsync, withPathPrefix } from './util';
 
@@ -157,6 +159,27 @@ describe('pin · cursor (GUI host)', () => {
       expect(records.find((r) => r.id === 'ours')?.pins).toEqual(['tool']);
       expect(records.find((r) => r.id === 'ours')?.installedFingerprint === undefined).toBe(false);
       expect(records.find((r) => r.id === 'theirs')).toBeUndefined();
+    });
+  });
+});
+
+describe('pin · Kimi native manifest', () => {
+  test('pins and doctor reads a kimi.plugin.json inline-only MCP server', async () => {
+    await withHostEnvAsync('kimi', async (home) => {
+      const root = join(home, '.kimi-code'); const dir = join(root, 'plugins', 'managed', 'native-inline');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'kimi.plugin.json'), JSON.stringify({ name: 'native-inline', mcpServers: { tool: { type: 'stdio', command: 'fixture-mcp' } } }, null, 2));
+      writeFileSync(join(root, 'plugins', 'installed.json'), JSON.stringify({ version: 1, plugins: [{ id: 'native-inline', root: dir, enabled: true }] }));
+      const bin = fakeBin(home, 'fixture-mcp');
+      await withPathPrefix(bin, async () => {
+        const result = await runPin({ writers: [kimiWriter], all: true });
+        expect(result.exitCode).toBe(0);
+      });
+      expect(serverCommand(join(dir, 'kimi.plugin.json'), 'tool')).toBe(join(bin, 'fixture-mcp'));
+      const entries = kimi.mcpEntries();
+      expect(entries.find((entry) => entry.pluginId === 'native-inline')?.file).toBe(join(dir, 'kimi.plugin.json'));
+      const doctor = runDoctor([kimi]);
+      expect(doctor.findings.some((finding) => finding.mark === '✗' && finding.message.includes("server 'tool'"))).toBe(false);
     });
   });
 });

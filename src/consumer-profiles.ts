@@ -1,0 +1,67 @@
+/**
+ * Frozen consumer inventory from SPEC.md § Compatibility and lifecycle
+ * requirements. Profiles describe evidence; they do not make an adapter active.
+ */
+import type { CompatibilityStatus, ConsumerCapability } from './compatibility';
+
+export const targetIds = [
+  'claude-code', 'codex', 'omp', 'dcode', 'hermes', 'openclaw', 'grok', 'kimi',
+  'zcode-cli', 'zcode-desktop', 'cursor', 'opencode', 'pi', 'gemini-cli',
+  'factory', 'grokbot',
+] as const;
+
+export type TargetId = typeof targetIds[number];
+
+export interface ConsumerProfile {
+  id: TargetId;
+  surface: string;
+  /** Observed version when known; otherwise evidence has not established one. */
+  version: string | 'unverified';
+  evidence: string;
+  capabilities: Readonly<Record<ConsumerCapability, CompatibilityStatus>>;
+}
+
+const active: Record<ConsumerCapability, CompatibilityStatus> = {
+  install: 'supported',
+  update: 'supported',
+  commandProjection: 'unverified',
+  userOnlySkills: 'unverified',
+};
+
+const pending = (id: TargetId, surface: string, evidence: string, version: ConsumerProfile['version'] = 'unverified'): ConsumerProfile => ({
+  id,
+  surface,
+  version,
+  evidence,
+  capabilities: { install: 'unverified', update: 'unverified', commandProjection: 'unverified', userOnlySkills: 'unverified' },
+});
+
+function profile(id: TargetId, surface: string, evidence: string, version: ConsumerProfile['version'], capabilities: ConsumerProfile['capabilities']): ConsumerProfile {
+  return { id, surface, version, evidence, capabilities };
+}
+
+/** Exactly the sixteen target ids frozen by SPEC.md; keep this independent of host adapters. */
+export const consumerProfiles: readonly ConsumerProfile[] = [
+  profile('claude-code', 'Claude Code plugin loader', 'docs/hosts/claude-code.md', '2.1.275', active),
+  profile('codex', 'Codex plugin loader', 'docs/evidence/codex-personal-20260922.json', '0.153.4', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
+  profile('omp', 'OMP native plugin loader', 'docs/hosts/omp.md', '18.1.4', { ...active, userOnlySkills: 'unsupported' }),
+  pending('dcode', 'deepagents-code plugin loader', 'docs/hosts/dcode.md', '0.1.71'),
+  pending('hermes', 'Hermes plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  pending('openclaw', 'OpenClaw plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  pending('grok', 'Grok Build plugin loader', 'SPEC.md § Compatibility and lifecycle requirements'),
+  profile('kimi', 'Kimi Code plugin loader', 'docs/hosts/kimi.md (isolated native probe, 2026-09-22)', '2.0.1', active),
+  pending('zcode-cli', 'Z.ai ZCode CLI plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  pending('zcode-desktop', 'Z.ai ZCode desktop plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  profile('cursor', 'Cursor local plugin loader', 'docs/hosts/cursor.md', '2026.09.18-9a7762b', active),
+  pending('opencode', 'OpenCode standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  profile('pi', 'Pi standalone skill loader', 'docs/evidence/pi-native-loader-20260922.json', '0.80.10', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
+  pending('gemini-cli', 'Gemini CLI standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  pending('factory', 'Factory standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  pending('grokbot', 'Grok Bot standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
+];
+
+const byId = new Map(consumerProfiles.map((entry) => [entry.id, entry]));
+
+export function findConsumerProfile(id: string): ConsumerProfile | undefined {
+  return byId.get(id as TargetId);
+}

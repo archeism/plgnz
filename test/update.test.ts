@@ -19,7 +19,9 @@ import { readState } from '../src/state';
 import { kimiWriter } from '../src/hosts/kimi-writer';
 import type { HostWriter } from '../src/host';
 import type { InstallRecord } from '../src/state';
+import { CompatibilityError } from '../src/compatibility';
 import { commitAll, fakeBin, initGitRepo, materialize, materializeInto, repoRoot, withHostEnvAsync, withPathPrefix, writeFiles, writeLedger } from './util';
+import { kimiNativeEnv, resetKimiNativeStore, withKimiNative } from './kimi-fixture';
 
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json';
 
@@ -40,8 +42,44 @@ function kimiManaged(home: string, plugin = 'demo-plugin'): string {
 }
 
 describe('update · re-add from the recorded source', () => {
+  test('rejects a name outside the frozen target inventory before reading the ledger', async () => {
+    await withHostEnvAsync('kimi', async () => {
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['update', '--target', 'not-a-target', '--json'])).toBe(2);
+      } finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; diagnostic?: string }>;
+      expect(outcomes[0]?.target).toBe('not-a-target');
+      expect(outcomes[0]?.status).toBe('failed');
+      expect(outcomes[0]?.diagnostic).toContain("unknown target 'not-a-target'");
+      expect(readState()).toEqual([]);
+    });
+  });
+
+  test('reports a declared target with no active adapter as unverified without reading or writing the ledger', async () => {
+    await withHostEnvAsync('kimi', async () => {
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['update', '--target', 'hermes', '--json'])).toBe(1);
+      } finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; action: string; dryRun: boolean; diagnostic?: string }>;
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]?.target).toBe('hermes');
+      expect(outcomes[0]?.status).toBe('unverified');
+      expect(outcomes[0]?.action).toBe('update');
+      expect(outcomes[0]?.dryRun).toBe(false);
+      expect(outcomes[0]?.diagnostic).toContain('unverified for update');
+      expect(readState()).toEqual([]);
+    });
+  });
+
   test('selected writers leave records for other hosts untouched', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       const repo = join(home, 'src-repo');
       const sha = sourceRepo(repo, 'demo-plugin', { tool: { type: 'stdio', command: '/bin/echo' } });
       writeLedger(home, [
@@ -52,6 +90,7 @@ describe('update · re-add from the recorded source', () => {
       expect(result.exitCode).toBe(0);
       expect(result.findings.some((finding) => finding.host === 'cursor')).toBe(false);
       expect(readState().find((record) => record.host === 'cursor')?.sourceSha).toBe(sha);
+      });
     });
   });
 
@@ -83,6 +122,26 @@ describe('update · re-add from the recorded source', () => {
       const state = readState();
       expect(state.find((record) => record.host === 'good-host')?.pending).toBeUndefined();
       expect(state.find((record) => record.host === 'bad-host')?.pending).toBe('install');
+    });
+  });
+
+  test('preserves a writer compatibility refusal as a nonzero typed update finding', async () => {
+    await withHostEnvAsync('kimi', async (home) => {
+      const repo = join(home, 'src-repo');
+      const sha = sourceRepo(repo, 'demo-plugin', { tool: { type: 'stdio', command: '/bin/echo' } });
+      const writer: HostWriter = {
+        id: 'compat-host', gui: false, detect: () => true, stores: () => [], listInstalled: () => [], mcpEntries: () => [],
+        add: async () => { throw new CompatibilityError('compat-host', 'update', 'unverified', 'test evidence'); },
+        remove: async () => {}, pin: async () => ({ changes: [], refusals: [] }),
+      };
+      const result = await runUpdate(undefined, {
+        state: [{ host: 'compat-host', id: 'demo-plugin', source: repo, sourceSha: sha }],
+        writers: [writer],
+        writeState: () => {},
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.findings[0]?.status).toBe('unverified');
+      expect(result.findings[0]?.message).toContain('refused');
     });
   });
 
@@ -121,12 +180,13 @@ describe('update · re-add from the recorded source', () => {
 
   test('actual CLI emits clean JSON for update dry-run', () => {
     const { home, env } = materialize('kimi');
+    resetKimiNativeStore(home);
     const repo = join(home, 'src-repo');
     const sha = sourceRepo(repo, 'demo-plugin', { tool: { type: 'stdio', command: '/bin/echo' } });
     writeLedger(home, [{ host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha }]);
     const result = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'update', '--target', 'kimi', '--dry-run', '--json'], {
       cwd: repoRoot,
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, ...kimiNativeEnv(home) },
       encoding: 'utf8',
     });
     expect(result.status).toBe(0);
@@ -148,9 +208,11 @@ describe('update · re-add from the recorded source', () => {
 
   test('kimi: re-materializes the copy and advances the recorded sha', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       const repo = join(home, 'src-repo');
       const sha1 = sourceRepo(repo, 'demo-plugin', { 'from-repo-v1': { type: 'stdio', command: '/bin/echo' } });
       const managed = kimiManaged(home);
+      expect(await main(['add', repo, '--target', 'kimi'])).toBe(0);
       writeFileSync(join(managed, 'stale.txt'), 'left by the previous install\n');
       writeLedger(home, [{ host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha1 }]);
 
@@ -168,11 +230,13 @@ describe('update · re-add from the recorded source', () => {
       expect(record?.sourceSha).toBe(sha2);
       expect(record?.sourceDir?.endsWith('/src-repo/demo-plugin')).toBe(true);
       expect(record?.installedFingerprint === undefined).toBe(false);
+      });
     });
   });
 
   test('without a name every recorded install is updated', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       materializeInto(home, 'cursor');
       const repo = join(home, 'src-repo');
       const sha = sourceRepo(repo, 'demo-plugin', { 'from-repo': { type: 'stdio', command: '/bin/echo' } });
@@ -189,14 +253,17 @@ describe('update · re-add from the recorded source', () => {
       expect(result.exitCode).toBe(0);
       expect(result.findings.filter((f) => f.mark === '✓').map((f) => f.host).sort()).toEqual(['cursor', 'kimi']);
       expect(readFileSync(join(home, '.cursor', 'plugins', 'local', 'demo-plugin', 'mcp.json'), 'utf8')).toContain('from-repo');
+      });
     });
   });
 
   test('--dry-run reports the update and writes nothing', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       const repo = join(home, 'src-repo');
       const sha = sourceRepo(repo, 'demo-plugin', { 'from-repo': { type: 'stdio', command: '/bin/echo' } });
       const managed = kimiManaged(home);
+      expect(await main(['add', repo, '--target', 'kimi'])).toBe(0);
       const before = readFileSync(join(managed, 'mcp.json'), 'utf8');
       writeLedger(home, [{ host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha }]);
 
@@ -206,6 +273,7 @@ describe('update · re-add from the recorded source', () => {
       expect(result.findings.some((f) => f.message.startsWith('[dry-run] '))).toBe(true);
       expect(readFileSync(join(managed, 'mcp.json'), 'utf8')).toBe(before);
       expect(readState(join(home, 'state.json'))[0]?.sourceSha).toBe(sha);
+      });
     });
   });
 });
@@ -213,8 +281,10 @@ describe('update · re-add from the recorded source', () => {
 describe('update · pins', () => {
   test('re-applies a recorded pin to the fresh copy', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       const repo = join(home, 'src-repo');
       const sha = sourceRepo(repo, 'demo-plugin', { 'local-tool': { type: 'stdio', command: 'fixture-mcp' } });
+      expect(await main(['add', repo, '--target', 'kimi'])).toBe(0);
       writeLedger(home, [
         { host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha, pins: ['local-tool'] },
       ]);
@@ -230,13 +300,16 @@ describe('update · pins', () => {
         mcpServers: Record<string, { command: string }>;
       };
       expect(pinned.mcpServers['local-tool']?.command).toBe(join(bin, 'fixture-mcp'));
+      });
     });
   });
 
   test('a pin that no longer resolves is refused, not guessed', async () => {
     await withHostEnvAsync('kimi', async (home) => {
+      await withKimiNative(home, async () => {
       const repo = join(home, 'src-repo');
       const sha = sourceRepo(repo, 'demo-plugin', { 'local-tool': { type: 'stdio', command: 'fixture-mcp' } });
+      expect(await main(['add', repo, '--target', 'kimi'])).toBe(0);
       writeLedger(home, [
         { host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha, pins: ['local-tool'] },
       ]);
@@ -249,6 +322,7 @@ describe('update · pins', () => {
         mcpServers: Record<string, { command: string }>;
       };
       expect(copy.mcpServers['local-tool']?.command).toBe('fixture-mcp');
+      });
     });
   });
 });

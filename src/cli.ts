@@ -13,6 +13,8 @@ import { runPin } from './pin';
 import { runUpdate } from './update';
 import { fingerprintTree } from './fingerprint';
 import type { HostReader, InstallOutcome } from './host';
+import { consumerProfiles, findConsumerProfile, type ConsumerProfile } from './consumer-profiles';
+import { CompatibilityError, requireCompatible } from './compatibility';
 import packageJson from '../package.json' with { type: 'json' };
 
 const USAGE = `plgnz — install, diagnose and update agent plugins and MCP configs
@@ -28,7 +30,7 @@ verbs:
                                     copy-based hosts and re-applies recorded pins
   list                              list installed plugins per host
   remove <plugin>                   remove an installed plugin
-  targets                           list detected agent hosts
+  targets [--all]                   list detected agent hosts; --all includes frozen consumer profiles
 `;
 
 /** Flags shared by `pin` and `update`. */
@@ -113,6 +115,38 @@ function select<T extends HostReader>(available: readonly T[], targets: readonly
   return { selected: selected.filter((host) => host.detect()) };
 }
 
+function selectProfiles(targets: readonly string[]): { selected: ConsumerProfile[]; error?: string } {
+  const duplicate = targets.find((target, index) => targets.indexOf(target) !== index);
+  if (duplicate !== undefined) return { selected: [], error: `duplicate target '${duplicate}'` };
+  const selected = targets.length === 0
+    ? writers.filter((writer) => writer.detect()).map((writer) => findConsumerProfile(writer.id)!).filter((profile): profile is ConsumerProfile => profile !== undefined)
+    : targets.map(findConsumerProfile);
+  const unknownIndex = selected.findIndex((profile) => profile === undefined);
+  if (unknownIndex !== -1) return { selected: [], error: `unknown target '${targets[unknownIndex]}' (known: ${consumerProfiles.map((profile) => profile.id).join(', ')})` };
+  return { selected: selected as ConsumerProfile[] };
+}
+
+function compatibilityOutcomes(profiles: readonly ConsumerProfile[], plugins: readonly string[], action: 'install' | 'update', dryRun: boolean): InstallOutcome[] | undefined {
+  const refusals = new Map<string, CompatibilityError>();
+  for (const profile of profiles) {
+    try { requireCompatible(profile, action); }
+    catch (error) { if (error instanceof CompatibilityError) refusals.set(profile.id, error); else throw error; }
+  }
+  if (refusals.size === 0) return undefined;
+  const diagnostic = 'not attempted because another selected target could not be admitted';
+  return profiles.flatMap((profile) => plugins.map((plugin) => {
+    const refusal = refusals.get(profile.id);
+    return {
+      plugin,
+      target: profile.id,
+      status: refusal?.status ?? 'failed',
+      action,
+      dryRun,
+      diagnostic: refusal?.message ?? diagnostic,
+    } satisfies InstallOutcome;
+  }));
+}
+
 async function withoutConsole<T>(fn: () => Promise<T>): Promise<T> {
   const original = console.log;
   console.log = () => {};
@@ -156,13 +190,13 @@ export async function main(argv: string[]): Promise<number> {
   
   if (verb === 'targets') {
     const flags = parseFlags(args.slice(1));
-    const disallowed = rejectDisallowed(flags, new Set());
+    const disallowed = rejectDisallowed(flags, new Set(['all']));
     if (disallowed || flags.positionals.length > 0) fail(`plgnz targets: ${disallowed ?? 'unexpected argument'}`, 2);
     const present = hosts.filter(h => h.detect());
     if (json) {
-      console.log(JSON.stringify(present.map(h => h.id), null, 2));
+      console.log(JSON.stringify(flags.all ? consumerProfiles : present.map(h => h.id), null, 2));
     } else {
-      for (const h of present) console.log(h.id);
+      for (const h of flags.all ? consumerProfiles : present) console.log(h.id);
     }
     return 0;
   }
@@ -258,16 +292,28 @@ export async function main(argv: string[]): Promise<number> {
     if (sourceArg === undefined) fail(`plgnz add: missing source`, 2);
 
     try {
-      const selection = select(writers, flags.targets);
-      if (selection.error) {
-        printOutcomes(flags.targets.map((target) => ({ plugin: '*', target, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
+      const profileSelection = selectProfiles(flags.targets);
+      if (profileSelection.error) {
+        printOutcomes(flags.targets.map((target) => ({ plugin: '*', target, status: 'failed', dryRun: flags.dryRun, diagnostic: profileSelection.error })), json);
         return 2;
       }
       if (flags.adoptExisting) {
-        const unsupported = selection.selected.find((writer) => writer.supportsAdoption !== true);
+        const incompatible = compatibilityOutcomes(profileSelection.selected, ['*'], 'install', flags.dryRun);
+        if (incompatible !== undefined) {
+          printOutcomes(incompatible, json);
+          return 1;
+        }
+        const adoptionSelection = flags.targets.length === 0
+          ? select(writers, [])
+          : select(writers, profileSelection.selected.map((profile) => profile.id));
+        if (adoptionSelection.error) {
+          printOutcomes(profileSelection.selected.map((profile) => ({ plugin: '*', target: profile.id, status: 'failed', dryRun: flags.dryRun, diagnostic: adoptionSelection.error })), json);
+          return 2;
+        }
+        const unsupported = adoptionSelection.selected.find((writer) => writer.supportsAdoption !== true);
         if (unsupported !== undefined) {
           const diagnostic = `target '${unsupported.id}' does not support --adopt-existing`;
-          printOutcomes(selection.selected.map((writer) => ({ plugin: '*', target: writer.id, status: 'unsupported' as const, action: 'install' as const, dryRun: flags.dryRun, diagnostic })), json);
+          printOutcomes(adoptionSelection.selected.map((writer) => ({ plugin: '*', target: writer.id, status: 'unsupported' as const, action: 'install' as const, dryRun: flags.dryRun, diagnostic })), json);
           return 2;
         }
       }
@@ -275,6 +321,18 @@ export async function main(argv: string[]): Promise<number> {
       const pluginSelection = selectPlugins(resolved.plugins, flags.plugins);
       if (pluginSelection.error) {
         printOutcomes([{ plugin: '*', target: '*', status: 'failed', dryRun: flags.dryRun, diagnostic: pluginSelection.error }], json);
+        return 2;
+      }
+      const incompatible = compatibilityOutcomes(profileSelection.selected, pluginSelection.selected.map((plugin) => plugin.name), 'install', flags.dryRun);
+      if (incompatible !== undefined) {
+        printOutcomes(incompatible, json);
+        return 1;
+      }
+      const selection = flags.targets.length === 0
+        ? select(writers, [])
+        : select(writers, profileSelection.selected.map((profile) => profile.id));
+      if (selection.error) {
+        printOutcomes(profileSelection.selected.map((profile) => ({ plugin: '*', target: profile.id, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
         return 2;
       }
       if (selection.selected.length === 0) throw new Error('No detected writer targets');
@@ -337,7 +395,7 @@ export async function main(argv: string[]): Promise<number> {
       const reported = new Set(outcomes.map((outcome) => `${outcome.plugin}\u0000${outcome.target}`));
       const failures: InstallOutcome[] = [];
       if (expected.length === 0) {
-        failures.push({ plugin: '*', target: activeTarget, status: 'failed', action: 'install', dryRun: flags.dryRun, diagnostic: e.message });
+          failures.push({ plugin: '*', target: e instanceof CompatibilityError ? e.target : activeTarget, status: e instanceof CompatibilityError ? e.status : 'failed', action: 'install', dryRun: flags.dryRun, diagnostic: e.message });
       } else {
         for (const pair of expected) {
           const key = `${pair.plugin}\u0000${pair.target}`;
@@ -345,7 +403,7 @@ export async function main(argv: string[]): Promise<number> {
           failures.push({
             plugin: pair.plugin,
             target: pair.target,
-            status: 'failed',
+            status: e instanceof CompatibilityError && pair.target === e.target ? e.status : 'failed',
             action: 'install',
             dryRun: flags.dryRun,
             diagnostic: pair.plugin === activePlugin && pair.target === activeTarget ? e.message : 'not attempted after an earlier install failure',
@@ -382,9 +440,21 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === 'update') {
     const flags = parseFlags(args.slice(1));
     if (rejectDisallowed(flags, new Set(['target', 'dryRun'])) || flags.positionals.length > 1) fail(`plgnz update: unexpected argument: ${flags.positionals[1]}`, 2);
-    const selection = select(writers, flags.targets);
+    const profileSelection = selectProfiles(flags.targets);
+    if (profileSelection.error) {
+      printOutcomes(flags.targets.map((target) => ({ plugin: flags.positionals[0] ?? '*', target, status: 'failed', dryRun: flags.dryRun, diagnostic: profileSelection.error })), json);
+      return 2;
+    }
+    const incompatible = compatibilityOutcomes(profileSelection.selected, [flags.positionals[0] ?? '*'], 'update', flags.dryRun);
+    if (incompatible !== undefined) {
+      printOutcomes(incompatible, json);
+      return 1;
+    }
+    const selection = flags.targets.length === 0
+      ? select(writers, [])
+      : select(writers, profileSelection.selected.map((profile) => profile.id));
     if (selection.error) {
-      printOutcomes(flags.targets.map((target) => ({ plugin: flags.positionals[0] ?? '*', target, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
+      printOutcomes(profileSelection.selected.map((profile) => ({ plugin: flags.positionals[0] ?? '*', target: profile.id, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
       return 2;
     }
     if (selection.selected.length === 0) {
@@ -395,7 +465,7 @@ export async function main(argv: string[]): Promise<number> {
       const result = json && flags.dryRun
         ? await withoutConsole(() => runUpdate(flags.positionals[0], { dryRun: true, writers: selection.selected }))
         : await runUpdate(flags.positionals[0], { dryRun: flags.dryRun, writers: selection.selected });
-      if (json) printOutcomes(result.findings.map((finding) => ({ plugin: flags.positionals[0] ?? '*', target: finding.host, status: finding.mark === '✓' ? 'installed' : finding.mark === '!' ? 'unverified' : 'failed', action: 'update', dryRun: flags.dryRun, diagnostic: finding.message })), true);
+      if (json) printOutcomes(result.findings.map((finding) => ({ plugin: flags.positionals[0] ?? '*', target: finding.host, status: finding.status ?? (finding.mark === '✓' ? 'installed' : finding.mark === '!' ? 'unverified' : 'failed'), action: 'update', dryRun: flags.dryRun, diagnostic: finding.message })), true);
       else printFindings(result.findings, false);
       return result.exitCode;
     } catch (error) {

@@ -52,10 +52,25 @@ describe('targets', () => {
     });
   });
 
-  test('actual CLI rejects flags that the verb does not support', () => {
+  test('actual CLI exposes all frozen profiles only when requested', () => {
     const result = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'targets', '--all'], { cwd: repoRoot, encoding: 'utf8' });
-    expect(result.status).toBe(2);
-    expect(result.stderr).toContain('--all is not supported');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('grokbot');
+  });
+
+  test('targets --all --json retains profile evidence while default JSON stays ids', async () => {
+    await withHostEnvAsync('claude-code', async () => {
+      const originalLog = console.log;
+      let output = '';
+      console.log = (message: string) => { output = message; };
+      try { expect(await main(['targets', '--all', '--json'])).toBe(0); }
+      finally { console.log = originalLog; }
+      const profiles = JSON.parse(output) as Array<{ id: string; evidence: string; capabilities: Record<string, string> }>;
+      expect(profiles).toHaveLength(16);
+      expect(profiles.find((profile) => profile.id === 'grokbot')?.capabilities.install).toBe('unverified');
+      expect(profiles.find((profile) => profile.id === 'cursor')?.evidence).toBe('docs/hosts/cursor.md');
+      expect(profiles.find((profile) => profile.id === 'codex')?.capabilities.commandProjection).toBe('supported');
+    });
   });
 
   test('actual CLI reports its package version as JSON', () => {
