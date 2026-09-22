@@ -1,0 +1,9 @@
+# Grok Build — audit only
+
+This route is **Grok Build** (`grok`), not Grok Bot. Native discovery preserves the semantics plgnz needs: `SKILL.md` supports both `user-invocable` and `disable-model-invocation`, and `commands/*.md` remains a native slash-command surface. `grok inspect --json` is a loader-only verification probe; it does not require a model request.
+
+The native CLI and registry are established: `grok plugin install <local-path> --trust`, `list --json`, `enable`, `uninstall`, and `~/.grok/installed-plugins/registry.json`. Personal's existing refresh path proves the limitation: for a changed same-version local source it invokes `uninstall <name> --confirm` before `install <source> --trust` (`/Users/chaz/personal/src/cli/plugins.ts:584-602`). A failed install after that successful uninstall leaves no active previous plugin.
+
+Grok source does implement `update_from_marketplace_entry_transactional` for a marketplace entry, including a test that a refused update preserves the existing install (`xai-grok-plugin-marketplace/src/installer.rs:194` and `:908-911`). That API does not establish a transactional update for the direct local-plugin path accepted by `grok plugin install`; Personal does not use it for local refresh. The native registry also has no plgnz ownership marker, so direct removal cannot independently distinguish a plgnz install from a user-managed one.
+
+Therefore no writer or host registration is added. A supported adapter requires a demonstrated, public local-source transactional update API (or an approved native marketplace materialization contract) with a failure-preservation test. Uninstall-then-install does not meet failure preservation. A staged marketplace or owned marker may provide a valid adapter, but this audit has not proved native loader tolerance, ownership readback, or transactional local refresh for either approach; those are implementation and verification gaps, not an inherent prohibition.
