@@ -36,23 +36,30 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
 
 - **Native lifecycle only.** `plgnz` stages a copied projection under the Kimi
   root, validates its Agent Plugins identity, and writes a `kimi.plugin.json`
-  with ordinary skills. Source skills with `disable-model-invocation` or
-  `user-invocable` are refused until Kimi's native exclusion behavior is proved.
+  with ordinary and manual skills. Kimi 2.0.1 bundled-loader source maps both
+  boolean `disable-model-invocation` spellings and filters the resulting manual
+  skills from its invocable-skill list. `user-invocable` is unsupported and is
+  refused. This is source-level behavior evidence, not an executed model
+  invocation claim.
   It preserves Kimi's proven inline `mcpServers`; explicit native fields outside
   the supported projection (`name`, `version`, `description`, `skills`,
   `commands`, `mcpServers`) fail visibly before activation. Source skill
-  frontmatter is retained byte-for-byte, but the real loader effect of
-  `disable-model-invocation` has not yet been proved.
+  frontmatter is retained byte-for-byte; conflicting manual aliases and
+  non-boolean manual values refuse staging.
 - **MCP projection.** The writer merges matching supported `mcpServers` from
   the Kimi native manifest, the root plugin manifest, `.mcp.json`, and
   `mcp.json` into `kimi.plugin.json`. A malformed declaration or conflicting
   duplicate server fails staging; no source MCP declaration is silently
   dropped. The reader and pin path prioritize that generated inline manifest.
-- **Command dialect boundary.** Markdown parsing and argument semantics remain
-  unverified in Kimi's native loader. Every command layout is therefore refused
-  before activation. TOML, other resource files, symlinks, and
-  `.claude/commands`-only layouts also receive specific staging refusals; the
-  writer never relocates, deletes, or partially drops command resources.
+- **Command dialect boundary.** Current Kimi recursively loads Markdown command
+  directories and expands `$ARGUMENTS`. The writer uses an existing
+  Markdown-only `commands/` tree, or an existing Markdown-only
+  `.claude/commands/` tree without moving files. When both exist, `.claude`
+  is selected unless a supplied native manifest explicitly selects the root
+  tree; that native pointer is preserved. Only `name` and `description`
+  command metadata plus `$ARGUMENTS` bodies are admitted. TOML-only, resource,
+  symlink, unsupported metadata, and unproven preprocessor layouts refuse
+  staging.
 - **`add` uses the current Kimi Code loopback plugin API.** The writer never
   authors `installed.json`. It starts Kimi with the resolved isolated
   `KIMI_CODE_HOME`, requests install and enable, then verifies Kimi's registry
@@ -86,6 +93,13 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
   temporary `KIMI_CODE_HOME`; native install, enable, registry, and managed
   `kimi.plugin.json` readback succeeded for a no-model fixture, then the server
   shut down and the temporary home was removed.
+- Isolated Mini loader probe, 2026-09-22 — a native manifest with
+  `skills: "./skills/"` and `commands: "./commands/"` loaded 25 skills and 9
+  Markdown commands (`skillCount: 25`, `commandCount: 9`) without a model
+  request. Bundled loader source records manual-skill filtering and
+  `$ARGUMENTS` expansion for both skills and commands; those are source
+  evidence, not model-executed behavior.
+- Machine-readable probe record: `docs/evidence/kimi-native-loader-20260922.json`.
 
 ## Open
 
@@ -97,5 +111,7 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
   staleness source is not exploited in v0 (state.json is the only ledger).
 - The isolated lifecycle fixture proves transaction/error handling against a
   simulated current Server API only. The separate real isolated probe above
-  proves only the native install/enable/readback path. Neither proves command
-  parsing or `disable-model-invocation` policy behavior.
+  proves only the native install/enable/readback path. The separate loader
+  discovery proves the two native pointers enumerate files; command argument
+  expansion and manual filtering rely on the recorded bundled-source excerpts.
+  No evidence here makes a full model invocation claim.

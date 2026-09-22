@@ -49,7 +49,7 @@ export const consumerProfiles: readonly ConsumerProfile[] = [
   pending('hermes', 'Hermes plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('openclaw', 'OpenClaw plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('grok', 'Grok Build plugin loader', 'SPEC.md § Compatibility and lifecycle requirements'),
-  profile('kimi', 'Kimi Code plugin loader', 'docs/hosts/kimi.md (isolated native probe, 2026-09-22)', '2.0.1', active),
+  profile('kimi', 'Kimi Code plugin loader', 'docs/hosts/kimi.md (isolated native probe, 2026-09-22)', '2.0.1', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   pending('zcode-cli', 'Z.ai ZCode CLI plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('zcode-desktop', 'Z.ai ZCode desktop plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   profile('cursor', 'Cursor local plugin loader', 'docs/hosts/cursor.md', '2026.09.18-9a7762b', active),

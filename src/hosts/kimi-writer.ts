@@ -6,8 +6,6 @@ import type { AddOptions, HostWriter, InstalledPlugin, PinOptions, PinOutcome } 
 import type { PluginSource, ResolvedSource } from '../source';
 import { kimi, mcpCandidates, pluginsDir } from './kimi';
 import { pinPluginMcpFiles } from '../mcp-write';
-import { requireCompatible } from '../compatibility';
-import { findConsumerProfile } from '../consumer-profiles';
 
 declare const Bun: any;
 declare const TextDecoder: any;
@@ -96,11 +94,6 @@ export const kimiWriter: HostWriter = {
 };
 
 function kimiRootPath(): string { return dirname(pluginsDir()); }
-function requireKimiCapability(capability: 'commandProjection' | 'userOnlySkills'): void {
-  const profile = findConsumerProfile('kimi');
-  if (profile === undefined) throw new Error('Kimi consumer profile is missing');
-  requireCompatible(profile, capability);
-}
 function assertId(value: string): void { if (!/^[a-z0-9][a-z0-9_-]{0,63}$/iu.test(value)) throw new Error(`invalid Kimi plugin id: ${value}`); }
 function sameRoot(value: unknown, target: string): boolean { return typeof value === 'string' && resolve(value) === resolve(target); }
 function readRegistry(path: string): Registry {
@@ -116,9 +109,9 @@ function stagePlugin(source: string, stage: string, expectedName: string): void 
   assertNoSymlinks(source); cpSync(source, stage, { recursive: true });
   const manifest = readSourceManifest(stage);
   if (manifest.name !== expectedName) throw new Error(`Kimi manifest identity does not match ${expectedName}`);
+  for (const key of ['hooks', 'agents', 'agent', 'executables']) if (manifest[key] !== undefined) throw new Error(`Kimi root manifest ${key} is unsupported without an explicit native declaration`);
   const skills = join(stage, 'skills'); if (existsSync(skills) && !statSync(skills).isDirectory()) throw new Error(`Kimi skills path is not a directory: ${skills}`);
-  if (existsSync(skills)) assertSupportedSkillPolicies(skills);
-  const commands = prepareCommands(stage);
+  if (existsSync(skills)) assertKimiSkillPolicies(skills);
   const native = join(stage, 'kimi.plugin.json');
   let supplied: Record<string, unknown> = {};
   if (existsSync(native)) {
@@ -126,12 +119,13 @@ function stagePlugin(source: string, stage: string, expectedName: string): void 
     if (supplied.name !== undefined && supplied.name !== expectedName) throw new Error(`Kimi native manifest name conflicts with ${expectedName}`);
     if (supplied.version !== undefined && supplied.version !== manifest.version) throw new Error('Kimi native manifest version conflicts with Agent Plugins manifest');
     if (supplied.skills !== undefined && supplied.skills !== './skills/' && supplied.skills !== './skills') throw new Error(`unsupported Kimi native skills pointer: ${String(supplied.skills)}`);
-    if (supplied.commands !== undefined && supplied.commands !== './commands/' && supplied.commands !== './commands') throw new Error(`unsupported Kimi native commands pointer: ${String(supplied.commands)}`);
+    if (supplied.commands !== undefined && !['./commands/', './commands', './.claude/commands/', './.claude/commands'].includes(String(supplied.commands))) throw new Error(`unsupported Kimi native commands pointer: ${String(supplied.commands)}`);
     for (const key of Object.keys(supplied)) if (!['name', 'version', 'description', 'skills', 'commands', 'mcpServers'].includes(key)) throw new Error(`unsupported Kimi native manifest field: ${key}`);
     if (supplied.mcpServers !== undefined && !isObject(supplied.mcpServers)) throw new Error('Kimi native manifest mcpServers must be an object');
   }
+  const commands = prepareCommands(stage, typeof supplied.commands === 'string' ? supplied.commands : undefined);
   const mcpServers = collectMcpServers(stage, manifest, supplied);
-  const nativeManifest: Record<string, unknown> = { name: expectedName, ...(typeof manifest.version === 'string' ? { version: manifest.version } : {}), ...(typeof manifest.description === 'string' ? { description: manifest.description } : {}), ...(existsSync(skills) ? { skills: './skills/' } : {}), ...(commands !== undefined ? { commands: './commands/' } : {}), ...(mcpServers !== undefined ? { mcpServers } : {}) };
+  const nativeManifest: Record<string, unknown> = { name: expectedName, ...(typeof manifest.version === 'string' ? { version: manifest.version } : {}), ...(typeof manifest.description === 'string' ? { description: manifest.description } : {}), ...(existsSync(skills) ? { skills: './skills/' } : {}), ...(commands !== undefined ? { commands } : {}), ...(mcpServers !== undefined ? { mcpServers } : {}) };
   writeFileSync(native, JSON.stringify(nativeManifest, null, 2));
   assertNoSymlinks(stage);
 }
@@ -161,22 +155,22 @@ function collectMcpServers(stage: string, manifest: Record<string, unknown>, sup
   }
   return found ? merged : undefined;
 }
-function prepareCommands(stage: string): string | undefined {
+function prepareCommands(stage: string, supplied?: string): string | undefined {
   const commands = join(stage, 'commands');
   if (existsSync(commands) && !statSync(commands).isDirectory()) throw new Error(`Kimi commands path is not a directory: ${commands}`);
   const claude = join(stage, '.claude', 'commands');
-  if (!existsSync(commands)) {
-    if (existsSync(claude)) throw new Error('Kimi command projection from .claude/commands is unverified; refusing to relocate command resources');
-    return undefined;
-  }
-  assertMarkdownCommandTree(commands);
-  if (!containsMarkdown(commands)) return undefined;
-  requireKimiCapability('commandProjection');
-  return commands;
+  const selected = supplied === undefined ? (existsSync(claude) ? './.claude/commands/' : existsSync(commands) ? './commands/' : undefined) : supplied.endsWith('/') ? supplied : `${supplied}/`;
+  if (selected === undefined) return undefined;
+  const dir = selected.startsWith('./.claude/') ? claude : commands;
+  if (!existsSync(dir)) throw new Error(`Kimi native commands pointer has no directory: ${selected}`);
+  assertMarkdownCommandTree(dir);
+  if (!containsMarkdown(dir)) throw new Error(`Kimi native commands pointer has no Markdown commands: ${selected}`);
+  return selected;
 }
-function assertSupportedSkillPolicies(dir: string): void { for (const name of readdirSync(dir)) { const path = join(dir, name); const stat = lstatSync(path); if (stat.isDirectory()) assertSupportedSkillPolicies(path); else if (stat.isFile() && name === 'SKILL.md') { const frontmatter = openingFrontmatter(readFileSync(path, 'utf8'), path); if (frontmatter !== undefined && ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable'].some(key => Object.hasOwn(frontmatter, key))) requireKimiCapability('userOnlySkills'); } } }
+function assertKimiSkillPolicies(dir: string): void { for (const name of readdirSync(dir)) { const path = join(dir, name); const stat = lstatSync(path); if (stat.isDirectory()) assertKimiSkillPolicies(path); else if (stat.isFile() && name === 'SKILL.md') { const frontmatter = openingFrontmatter(readFileSync(path, 'utf8'), path); if (frontmatter !== undefined && ['user-invocable', 'user_invocable'].some(key => Object.hasOwn(frontmatter, key))) throw new Error(`Kimi does not support user-invocable skill policy: ${path}`); const hyphen = frontmatter?.['disable-model-invocation'], underscore = frontmatter?.disable_model_invocation; if (hyphen !== undefined && underscore !== undefined && hyphen !== underscore) throw new Error(`Kimi disable-model-invocation aliases conflict: ${path}`); for (const value of [hyphen, underscore]) if (value !== undefined && typeof value !== 'boolean') throw new Error(`Kimi disable-model-invocation must be boolean: ${path}`); } } }
 function openingFrontmatter(raw: string, path: string): Record<string, unknown> | undefined { const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(raw); if (match === null) return undefined; let parsed: unknown; try { parsed = Bun.YAML.parse(match[1] ?? ''); } catch { throw new Error(`Kimi skill frontmatter has invalid YAML: ${path}`); } if (!isObject(parsed)) throw new Error(`Kimi skill frontmatter must be an object: ${path}`); return parsed; }
-function assertMarkdownCommandTree(dir: string): void { for (const name of readdirSync(dir)) { const path = join(dir, name); const stat = lstatSync(path); if (stat.isSymbolicLink()) throw new Error(`Kimi command source contains symlink: ${path}`); if (stat.isDirectory()) assertMarkdownCommandTree(path); else if (!stat.isFile() || !name.endsWith('.md')) throw new Error(`Kimi command projection cannot preserve non-Markdown resource: ${path}`); } }
+function assertMarkdownCommandTree(dir: string): void { for (const name of readdirSync(dir)) { const path = join(dir, name); const stat = lstatSync(path); if (stat.isSymbolicLink()) throw new Error(`Kimi command source contains symlink: ${path}`); if (stat.isDirectory()) assertMarkdownCommandTree(path); else if (!stat.isFile() || !name.endsWith('.md')) throw new Error(`Kimi command projection cannot preserve non-Markdown resource: ${path}`); else assertKimiCommand(path); } }
+function assertKimiCommand(path: string): void { const raw = readFileSync(path, 'utf8'); const frontmatter = openingFrontmatter(raw, path); if (frontmatter === undefined) throw new Error(`Kimi command needs YAML frontmatter: ${path}`); for (const key of Object.keys(frontmatter)) if (!['name', 'description'].includes(key)) throw new Error(`Kimi command metadata is unsupported: ${key} in ${path}`); const body = raw.slice(raw.indexOf('\n---', 4) + 4); if (/!`[\s\S]*?`|@\{|\$\d+(?!\w)/u.test(body)) throw new Error(`Kimi command preprocessing is unsupported: ${path}`); }
 function containsMarkdown(dir: string): boolean { return readdirSync(dir).some(name => { const path = join(dir, name); return statSync(path).isDirectory() ? containsMarkdown(path) : name.endsWith('.md'); }); }
 function readSourceManifest(stage: string): Record<string, unknown> {
   const file = [join(stage, 'plugin.json'), join(stage, '.plugin', 'plugin.json')].find(existsSync);

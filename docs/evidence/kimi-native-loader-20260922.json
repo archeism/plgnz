@@ -1,0 +1,28 @@
+{
+  "runtime": {
+    "binary": "/Users/mac/.local/share/kimi-code/bin/kimi",
+    "version": "2.0.1",
+    "sha256": "9945e9c7dad0b35eabc0fcb750d95b13ae57486979818bfff95406e382312cfc"
+  },
+  "bundleOffsets": {
+    "metadataAliases": 95548492,
+    "listInvocableSkills": 96123463,
+    "expandCommandArguments": 101019138,
+    "readCommands": 101031238
+  },
+  "artifacts": {
+    "sourceExcerpts": "docs/evidence/kimi-native-loader-20260922.source-excerpts.txt",
+    "probeOutput": "docs/evidence/kimi-native-loader-20260922.output.json",
+    "probeOutline": "docs/evidence/kimi-native-loader-20260922.probe-outline.md"
+  },
+  "limits": "25-skill/9-command root-pointer readback is discovery only; manual exclusion and argument expansion are source evidence.",
+  "independentSourceVerification": {
+    "method": "Read the recorded byte offsets from the actual Mini binary over ssh m1",
+    "verified": [
+      "hyphen and underscore manual-policy aliases normalize to disableModelInvocation",
+      "listInvocableSkills excludes disableModelInvocation true",
+      "expandCommandArguments replaces $ARGUMENTS or appends the tail"
+    ],
+    "scope": "Source verification only; not an executed model invocation"
+  }
+}

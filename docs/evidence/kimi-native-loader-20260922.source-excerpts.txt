@@ -1,0 +1,6 @@
+Kimi Code 2.0.1 /Users/mac/.local/share/kimi-code/bin/kimi
+SHA-256 9945e9c7dad0b35eabc0fcb750d95b13ae57486979818bfff95406e382312cfc
+offset 95548492: METADATA_ALIASES includes "disable-model-invocation": "disableModelInvocation", disable_model_invocation: "disableModelInvocation".
+offset 96123463: listInvocableSkills filters skill.metadata.disableModelInvocation !== true.
+offset 101019138: expandCommandArguments replaces $ARGUMENTS and appends ARGUMENTS when absent.
+offset 101031238: readCommands calls listMarkdownFilesRecursive for a command directory.

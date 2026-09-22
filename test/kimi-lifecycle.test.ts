@@ -87,21 +87,97 @@ describe('Kimi lifecycle preflight', () => {
     });
   });
 
-  test('refuses commands and user-only skill policies until native semantics are proved', async () => {
+  test('uses native Markdown commands and manual-skill exclusion while refusing unsupported user-invocable policy', async () => {
     await withKimi(async ({ home, plugin, resolved }) => {
       writeFiles(plugin.dir, { 'commands/run.md': '---\ndescription: Run\n---\n$ARGUMENTS\n' });
-      let commandFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { commandFailure = error as Error; }
-      expect(commandFailure?.message).toContain("target 'kimi' is unverified for commandProjection");
+      expect(await kimiWriter.add(plugin, resolved, { dryRun: true })).toBeUndefined();
       rmSync(join(plugin.dir, 'commands'), { recursive: true });
       writeFiles(plugin.dir, { 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\ndisable-model-invocation: true\n---\nBody\n' });
-      let skillFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { skillFailure = error as Error; }
-      expect(skillFailure?.message).toContain("target 'kimi' is unverified for userOnlySkills");
+      expect(await kimiWriter.add(plugin, resolved, { dryRun: true })).toBeUndefined();
       writeFiles(plugin.dir, { 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\n"disable-model-invocation": true\n---\nBody\n' });
-      let quotedFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { quotedFailure = error as Error; }
-      expect(quotedFailure?.message).toContain("target 'kimi' is unverified for userOnlySkills");
+      expect(await kimiWriter.add(plugin, resolved, { dryRun: true })).toBeUndefined();
       writeFiles(plugin.dir, { 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\n---\nThe text disable-model-invocation: true is body text.\n' });
       expect(await kimiWriter.add(plugin, resolved, { dryRun: true })).toBeUndefined();
+      writeFiles(plugin.dir, { 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\nuser-invocable: false\n---\nBody\n' });
+      let policyFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { policyFailure = error as Error; }
+      expect(policyFailure?.message).toContain('does not support user-invocable skill policy');
       expect(existsSync(join(home, '.kimi-code', 'plugins', 'managed', 'demo'))).toBe(false);
+    });
+  });
+
+  test('honors an explicit native commands pointer when both supported command trees exist', async () => {
+    await withKimi(async ({ home, plugin, resolved }) => {
+      await withKimiNative(home, async () => {
+        writeFiles(plugin.dir, {
+          'commands/root.md': '---\ndescription: Root\n---\n$ARGUMENTS\n',
+          '.claude/commands/claude.md': '---\ndescription: Claude\n---\n$ARGUMENTS\n',
+          'kimi.plugin.json': '{"name":"demo","commands":"./commands/"}',
+        });
+        await kimiWriter.add(plugin, resolved);
+        const target = join(home, '.kimi-code', 'plugins', 'managed', 'demo');
+        expect(JSON.parse(readFileSync(join(target, 'kimi.plugin.json'), 'utf8')).commands).toBe('./commands/');
+        expect(existsSync(join(target, 'commands/root.md'))).toBe(true);
+        expect(existsSync(join(target, '.claude/commands/claude.md'))).toBe(true);
+      });
+    });
+  });
+
+  test('rejects the chosen .claude command tree even when a valid root tree also exists', async () => {
+    await withKimi(async ({ home, plugin, resolved }) => {
+      writeFiles(plugin.dir, {
+        'commands/root.md': '---\ndescription: Root\n---\n$ARGUMENTS\n',
+        '.claude/commands/invalid.md': '---\ndescription: Invalid\nallowed-tools: Bash\n---\nBody\n',
+      });
+      let failure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { failure = error as Error; }
+      expect(failure?.message).toContain('Kimi command metadata is unsupported: allowed-tools');
+      expect(existsSync(join(home, '.kimi-code', 'plugins', 'managed', 'demo'))).toBe(false);
+    });
+  });
+
+  test('refuses unsupported command metadata and preprocessing without replacing an active plugin', async () => {
+    await withKimi(async ({ home, plugin, resolved }) => {
+      await withKimiNative(home, async () => {
+        await kimiWriter.add(plugin, resolved);
+        const target = join(home, '.kimi-code', 'plugins', 'managed', 'demo');
+        const before = readFileSync(join(target, 'skills/ordinary/SKILL.md'), 'utf8');
+        writeFiles(plugin.dir, { 'commands/invalid.md': '---\ndescription: Invalid\nmodel: fast\n---\nBody\n' }); plugin.contentFingerprint = 'metadata';
+        let metadataFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved); } catch (error) { metadataFailure = error as Error; }
+        expect(metadataFailure?.message).toContain('Kimi command metadata is unsupported: model');
+        expect(readFileSync(join(target, 'skills/ordinary/SKILL.md'), 'utf8')).toBe(before);
+        rmSync(join(plugin.dir, 'commands'), { recursive: true });
+        writeFiles(plugin.dir, { 'commands/preprocess.md': '---\ndescription: Invalid\n---\n!`date`\n' }); plugin.contentFingerprint = 'preprocess';
+        let preprocessingFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved); } catch (error) { preprocessingFailure = error as Error; }
+        expect(preprocessingFailure?.message).toContain('Kimi command preprocessing is unsupported');
+        expect(readFileSync(join(target, 'skills/ordinary/SKILL.md'), 'utf8')).toBe(before);
+      });
+    });
+  });
+
+  test('refuses conflicting manual aliases and unproven numeric command placeholders', async () => {
+    await withKimi(async ({ plugin, resolved }) => {
+      writeFiles(plugin.dir, { 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\ndisable-model-invocation: true\ndisable_model_invocation: false\n---\nBody\n' });
+      let aliasFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { aliasFailure = error as Error; }
+      expect(aliasFailure?.message).toContain('aliases conflict');
+      writeFiles(plugin.dir, { 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\n---\nBody\n', 'commands/numbered.md': '---\ndescription: Numbered\n---\n$1\n' });
+      let placeholderFailure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { placeholderFailure = error as Error; }
+      expect(placeholderFailure?.message).toContain('Kimi command preprocessing is unsupported');
+    });
+  });
+
+  test('preserves ordinary persona and resource files while refusing executable manifest declarations', async () => {
+    await withKimi(async ({ home, plugin, resolved }) => {
+      await withKimiNative(home, async () => {
+        writeFiles(plugin.dir, { 'agents/persona.md': 'ordinary persona', 'skills/ordinary/resources/example.txt': 'resource' });
+        await kimiWriter.add(plugin, resolved);
+        const target = join(home, '.kimi-code', 'plugins', 'managed', 'demo');
+        expect(readFileSync(join(target, 'agents/persona.md'), 'utf8')).toBe('ordinary persona');
+        expect(readFileSync(join(target, 'skills/ordinary/resources/example.txt'), 'utf8')).toBe('resource');
+      });
+      for (const key of ['hooks', 'agents', 'executables']) {
+        writeFiles(plugin.dir, { 'plugin.json': JSON.stringify({ name: 'demo', version: '1.0.0', description: 'Demo', [key]: {} }) });
+        let failure: Error | undefined; try { await kimiWriter.add(plugin, resolved, { dryRun: true }); } catch (error) { failure = error as Error; }
+        expect(failure?.message).toContain(`Kimi root manifest ${key} is unsupported`);
+      }
     });
   });
 
