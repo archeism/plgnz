@@ -36,3 +36,18 @@ Verification at acceptance:
 The private Claude marketplace/install/update/reinstall branch is removed.
 Personal retains bundling and selection; the public CLI owns native delivery.
 No npm publication or fleet deployment occurred. Skills were not revised.
+
+## Readback correction after acceptance
+
+The coordinator's subsequent raw-output check found that public Claude `list`
+omitted `enabled`, although Personal requires that boolean. Separate native
+and public CLI checks had missed the consumer failure. The opt-in Personal
+test now calls `installedPaths` through the actual CLI: it failed against
+`38aad2c`, then passed after the reader included native user enablement from
+`settings.json`. Native Claude confirmed explicit false and absent settings
+entries both mean disabled. The regression checks all three states.
+
+Sol independently reproduced RED against the old installed launcher and GREEN
+against the candidate. Core verification: 209 tests, zero failures; typecheck
+passed. Personal composition: four tests, zero failures, 16 assertions. This
+supersedes the initial claim that the readback consumer had been fully checked.

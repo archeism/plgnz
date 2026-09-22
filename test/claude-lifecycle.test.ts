@@ -58,6 +58,17 @@ async function failure(run: () => Promise<unknown>): Promise<Error> {
 }
 
 describe('claude-code lifecycle', () => {
+  test('reports native user enablement rather than treating installation as activation', async () => {
+    await isolated(async root => {
+      const incoming = fixture({});
+      await claudeCodeWriter.add(incoming.plugin, incoming.resolved);
+      expect(claudeCode.listInstalled()[0]?.enabled).toBe(true);
+      writeFileSync(join(root, 'settings.json'), JSON.stringify({ enabledPlugins: { 'addy@personal': false } }));
+      expect(claudeCode.listInstalled()[0]?.enabled).toBe(false);
+      writeFileSync(join(root, 'settings.json'), '{}');
+      expect(claudeCode.listInstalled()[0]?.enabled).toBe(false);
+    });
+  });
   test('validates a dry-run without creating a Claude store', async () => {
     await isolated(async root => {
       const incoming = fixture({});

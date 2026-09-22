@@ -77,6 +77,10 @@ export const claudeCode: HostReader = {
     if (root === null) return [];
     const plugins = root['plugins'];
     if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins)) return [];
+    const settings = readJson(join(claudeCodeRoot(), 'settings.json'));
+    const enabled = settings?.['enabledPlugins'];
+    const enabledPlugins = typeof enabled === 'object' && enabled !== null && !Array.isArray(enabled)
+      ? enabled as Record<string, unknown> : {};
     const out: InstalledPlugin[] = [];
     for (const [id, value] of Object.entries(plugins as Record<string, unknown>)) {
       const at = id.indexOf('@');
@@ -96,7 +100,8 @@ export const claudeCode: HostReader = {
             : undefined;
         const path = recordedPath !== undefined && existsSync(recordedPath) ? recordedPath : fallback;
         const sha = typeof rec.gitCommitSha === 'string' ? rec.gitCommitSha : undefined;
-        const plugin: InstalledPlugin = { id, name };
+        // Native user-scope installs are disabled unless explicitly enabled in settings.
+        const plugin: InstalledPlugin = { id, name, enabled: enabledPlugins[id] === true };
         if (marketplace !== undefined) plugin.marketplace = marketplace;
         if (path !== undefined) plugin.path = path;
         if (version !== undefined) plugin.version = version;
