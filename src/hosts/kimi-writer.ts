@@ -20,6 +20,7 @@ export const kimiWriter: HostWriter = {
   supportsAdoption: true,
   async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void | 'unchanged'> {
     const id = plugin.name;
+    const ownedId = plugin.marketplace === undefined ? id : `${id}@${plugin.marketplace}`;
     assertId(id);
     const root = pluginsDir();
     const managedRoot = join(root, 'managed');
@@ -33,11 +34,12 @@ export const kimiWriter: HostWriter = {
     const stage = join(stageRoot, id);
     try {
       stagePlugin(plugin.dir, stage, id);
-      writeFileSync(join(stage, MARKER), JSON.stringify({ source: resolved.sourceUri, pluginId: id, fingerprint: plugin.contentFingerprint ?? '' } satisfies Ownership));
+      writeFileSync(join(stage, MARKER), JSON.stringify({ source: resolved.sourceUri, pluginId: ownedId, fingerprint: plugin.contentFingerprint ?? '' } satisfies Ownership));
       const prior = readRegistry(registryFile);
       const priorRow = prior.plugins.find(row => row.id === id);
       const marker = readOwnership(target);
-      if (marker !== null && (marker.source !== resolved.sourceUri || marker.pluginId !== id)) throw new Error(`Kimi plugin ${id} belongs to another source; refusing to replace it`);
+      const markerHasExpectedIdentity = marker?.pluginId === ownedId || (plugin.marketplace !== undefined && marker?.pluginId === id);
+      if (marker !== null && (marker.source !== resolved.sourceUri || !markerHasExpectedIdentity)) throw new Error(`Kimi plugin ${id} belongs to another source; refusing to replace it`);
       const same = existsSync(target) && sameTree(stage, target);
       if (existsSync(target) && marker === null && !same) {
         if (!opts?.adoptExisting) throw new Error(`Kimi managed plugin ${id} is unowned and differs from the staged representation; pass --adopt-existing to take ownership explicitly`);
@@ -82,20 +84,29 @@ export const kimiWriter: HostWriter = {
     return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
   },
   async remove(id: string): Promise<void> {
-    assertId(id);
-    const root = pluginsDir(); const target = join(root, 'managed', id); const registryFile = join(root, 'installed.json');
+    const nativeId = id.split('@', 1)[0] ?? '';
+    assertId(nativeId);
+    const root = pluginsDir(); const target = join(root, 'managed', nativeId); const registryFile = join(root, 'installed.json');
     assertManagedPath(kimiRootPath(), root); assertManagedPath(kimiRootPath(), dirname(target)); assertManagedPath(kimiRootPath(), target); assertFilePath(kimiRootPath(), registryFile);
-    const row = readRegistry(registryFile).plugins.find(candidate => candidate.id === id);
+    const row = readRegistry(registryFile).plugins.find(candidate => candidate.id === nativeId);
     const marker = readOwnership(target);
     if (row === undefined || marker === null || marker.pluginId !== id || !sameRoot(row.root, target)) throw new Error(`Kimi plugin ${id} is not wholly plgnz-owned; refusing native removal`);
-    await nativeRemove(kimiRootPath(), resolveKimiBinary(), id);
-    if (readRegistry(registryFile).plugins.some(candidate => candidate.id === id)) throw new Error(`Kimi native removal did not deactivate plugin ${id}`);
+    await nativeRemove(kimiRootPath(), resolveKimiBinary(), nativeId);
+    if (readRegistry(registryFile).plugins.some(candidate => candidate.id === nativeId)) throw new Error(`Kimi native removal did not deactivate plugin ${id}`);
   },
 };
 
 function kimiRootPath(): string { return dirname(pluginsDir()); }
 function assertId(value: string): void { if (!/^[a-z0-9][a-z0-9_-]{0,63}$/iu.test(value)) throw new Error(`invalid Kimi plugin id: ${value}`); }
-function sameRoot(value: unknown, target: string): boolean { return typeof value === 'string' && resolve(value) === resolve(target); }
+function sameRoot(value: unknown, target: string): boolean {
+  if (typeof value !== 'string') return false;
+  try {
+    const left = statSync(value) as unknown as { dev: number; ino: number };
+    const right = statSync(target) as unknown as { dev: number; ino: number };
+    return left.dev === right.dev && left.ino === right.ino;
+  }
+  catch { return resolve(value) === resolve(target); }
+}
 function readRegistry(path: string): Registry {
   if (!existsSync(path)) return { version: 1, plugins: [] };
   let raw: unknown; try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch (error) { throw new Error(`invalid Kimi installed registry: ${(error as Error).message}`); }

@@ -1,0 +1,88 @@
+{
+  "scenario": "Kimi 2.0.1 isolated public CLI install, readback, doctor, unchanged re-add, changed-byte refresh, guarded failure, recovery, and removal",
+  "runtime": {
+    "version": "2.0.1",
+    "host": "isolated macOS Mini probe",
+    "kimiCodeHome": "<isolated-root>/kimi",
+    "plgnzHome": "<isolated-root>/home"
+  },
+  "model_calls": 0,
+  "regressions": [
+    {
+      "boundary": "native root identity",
+      "before": "Kimi recorded /private/tmp/.../plugins/managed/personal while plgnz expected /tmp/.../plugins/managed/personal; lexical comparison rejected the successful native install and rollback removed the new registry row.",
+      "after": "Existing recorded and expected roots are compared by filesystem identity; the canonical alias is accepted."
+    },
+    {
+      "boundary": "marketplace logical id",
+      "before": "Kimi recorded native id personal while the plgnz install ledger expected personal@personal; public add failed post-install readback with native install readback is missing personal@personal.",
+      "after": "Kimi keeps the bare native id and plgnz exposes the validated marker-owned logical id personal@personal for list, doctor, update, and remove."
+    }
+  ],
+  "calls": [
+    {
+      "args": ["add", "<isolated-root>/collection", "--target", "kimi", "--plugin", "personal"],
+      "exit": 0,
+      "stdout": "kimi\tinstalled\tpersonal"
+    },
+    {
+      "args": ["list", "--target", "kimi"],
+      "exit": 0,
+      "stdout": "kimi\tpersonal@personal\tunknown",
+      "nativeRegistry": {
+        "id": "personal",
+        "root": "/private/tmp/<isolated-root>/kimi/plugins/managed/personal",
+        "enabled": true
+      }
+    },
+    {
+      "args": ["doctor", "--target", "kimi"],
+      "exit": 0,
+      "stdout": [
+        "kimi  ✓  install 'personal@personal' source and native content match their recorded byte proofs",
+        "kimi  !  install 'personal@personal' staleness unknown — cannot determine head of <isolated-root>/collection"
+      ]
+    },
+    {
+      "args": ["add", "<isolated-root>/collection", "--target", "kimi", "--plugin", "personal"],
+      "exit": 0,
+      "stdout": "kimi\tunchanged\tpersonal"
+    },
+    {
+      "setup": "Append a public fixture line to one source skill.",
+      "args": ["add", "<isolated-root>/collection", "--target", "kimi", "--plugin", "personal"],
+      "exit": 0,
+      "stdout": "kimi\tinstalled\tpersonal",
+      "readback": "The appended fixture line was present in the active managed copy."
+    },
+    {
+      "setup": "Add an unsupported hooks field to the source root manifest.",
+      "args": ["add", "<isolated-root>/collection", "--target", "kimi", "--plugin", "personal"],
+      "exit": 1,
+      "stderr": "Kimi root manifest hooks is unsupported without an explicit native declaration",
+      "readback": "The active skill bytes had the same SHA-256 before and after the refused add."
+    },
+    {
+      "setup": "Restore the valid source manifest; this also resolves the durable pending install intent left by the expected failed add.",
+      "args": ["add", "<isolated-root>/collection", "--target", "kimi", "--plugin", "personal"],
+      "exit": 0,
+      "stdout": "kimi\tunchanged\tpersonal"
+    },
+    {
+      "args": ["remove", "personal@personal", "--target", "kimi"],
+      "exit": 0,
+      "stdout": "kimi\tinstalled\tpersonal@personal",
+      "readback": {
+        "list": "empty",
+        "nativeRegistry": {"version": 1, "plugins": []},
+        "plgnzInstalls": []
+      }
+    }
+  ],
+  "limits": [
+    "This probe used explicit isolated Kimi and plgnz homes and did not mutate a real user home or fleet installation.",
+    "It proves the native public CLI lifecycle, registry/readback identity, content protection, and removal behavior without a model request.",
+    "It does not prove model-time skill selection, command execution, MCP execution, or other full-session semantics.",
+    "Kimi's native remove endpoint removed the registry row and retained the managed cache directory; plgnz does not hand-edit that native cache."
+  ]
+}

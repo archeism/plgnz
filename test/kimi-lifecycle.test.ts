@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { kimiWriter } from '../src/hosts/kimi-writer';
+import { kimi } from '../src/hosts/kimi';
 import { type PluginSource, type ResolvedSource } from '../src/source';
 import { writeFiles } from './util';
 import { withKimiNative } from './kimi-fixture';
@@ -41,6 +42,39 @@ describe('Kimi lifecycle preflight', () => {
         expect(failure?.message).toContain('forced enable failure'); expect(readFileSync(join(target, 'skills/ordinary/SKILL.md'), 'utf8')).toContain('Changed');
         expect(readFileSync(join(home, '.kimi-code', 'plugins', 'installed.json'), 'utf8')).toBe(registryBeforeFailure);
         expect(readdirSync(join(home, '.kimi-code', 'plugins')).some(name => name.startsWith('.plgnz-kimi-'))).toBe(false);
+      });
+    });
+  });
+  test('accepts the native registry canonicalizing an existing managed root', async () => {
+    await withKimi(async ({ home, plugin, resolved }) => {
+      await withKimiNative(home, async () => {
+        process.env.KIMI_CANONICALIZE_ROOT = '1';
+        try {
+          await kimiWriter.add(plugin, resolved);
+          expect(existsSync(join(home, '.kimi-code', 'plugins', 'managed', 'demo'))).toBe(true);
+        } finally {
+          delete process.env.KIMI_CANONICALIZE_ROOT;
+        }
+      });
+    });
+  });
+  test('maps a marketplace package between its logical id and Kimi bare native id', async () => {
+    await withKimi(async ({ home, plugin, resolved }) => {
+      await withKimiNative(home, async () => {
+        plugin.marketplace = 'catalog';
+        await kimiWriter.add(plugin, resolved);
+        expect(kimi.listInstalled().map(installed => installed.id)).toEqual(['demo@catalog']);
+        const marker = join(home, '.kimi-code', 'plugins', 'managed', 'demo', '.plgnz-install.json');
+        writeFileSync(marker, JSON.stringify({ source: resolved.sourceUri, pluginId: 'demo', fingerprint: 'one' }));
+        plugin.contentFingerprint = 'two';
+        await kimiWriter.add(plugin, resolved);
+        expect(kimi.listInstalled().map(installed => installed.id)).toEqual(['demo@catalog']);
+        writeFileSync(marker, JSON.stringify({ source: resolved.sourceUri, pluginId: 'other@catalog', fingerprint: 'two' }));
+        expect(kimi.listInstalled().map(installed => installed.id)).toEqual(['demo']);
+        writeFileSync(marker, JSON.stringify({ source: resolved.sourceUri, pluginId: 'demo@catalog', fingerprint: 'two' }));
+        await kimiWriter.remove('demo@catalog');
+        expect(kimi.listInstalled()).toHaveLength(0);
+        expect(existsSync(join(home, '.kimi-code', 'plugins', 'managed', 'demo'))).toBe(true);
       });
     });
   });

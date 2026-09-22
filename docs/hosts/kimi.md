@@ -26,6 +26,16 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
   identical entries deduped.
 - `root` records are absolute; the reader falls back to
   `plugins/managed/<id>` when the recorded path is gone.
+- Kimi canonicalizes macOS temporary paths: a plugin installed from an
+  isolated `/tmp/...` home can be recorded under `/private/tmp/...`. Writer
+  readback compares existing roots by filesystem identity rather than lexical
+  spelling. This prevents a successful native install from being mistaken for
+  a missing install and rolled back.
+- Kimi's registry id is the bare native plugin name. For a marketplace source,
+  plgnz keeps its logical `name@marketplace` identity in the ownership marker;
+  the reader exposes that logical id only when its name matches the native row.
+  Native API calls still use the bare name. A same-source legacy bare marker is
+  accepted on refresh and rewritten to the logical id.
 - **User-level MCP (unverified)**: kimi is a TOML-config host like codex
   (`~/.kimi-code/config.toml`), so the reader also parses
   `[mcp_servers.<name>]` there — none exist on this machine as of 2026-09-16
@@ -100,6 +110,11 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
   `$ARGUMENTS` expansion for both skills and commands; those are source
   evidence, not model-executed behavior.
 - Machine-readable probe record: `docs/evidence/kimi-native-loader-20260922.json`.
+- Public CLI lifecycle record:
+  `docs/evidence/kimi-public-lifecycle-20260922.json`. On an isolated Kimi
+  2.0.1 home it records install, logical-id list/readback, healthy doctor,
+  unchanged re-add, changed-byte refresh, a refused unsupported manifest that
+  preserved active bytes, recovery, and removal with an empty registry.
 
 ## Open
 
@@ -110,8 +125,9 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
 - Whether the plugins CLI's `originalSource` staging path can serve as a
   staleness source is not exploited in v0 (state.json is the only ledger).
 - The isolated lifecycle fixture proves transaction/error handling against a
-  simulated current Server API only. The separate real isolated probe above
-  proves only the native install/enable/readback path. The separate loader
-  discovery proves the two native pointers enumerate files; command argument
-  expansion and manual filtering rely on the recorded bundled-source excerpts.
-  No evidence here makes a full model invocation claim.
+  simulated current Server API. The real public CLI lifecycle record proves
+  install/readback, doctor, re-add, refresh, guarded failure, recovery, and
+  removal against Kimi 2.0.1. The separate loader discovery proves the two
+  native pointers enumerate files; command argument expansion and manual
+  filtering rely on the recorded bundled-source excerpts. None of this
+  evidence makes a full model invocation claim.

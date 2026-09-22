@@ -69,8 +69,13 @@ export const kimi: HostReader = {
       const rec = raw as Record<string, unknown>;
       const id = typeof rec['id'] === 'string' ? rec['id'] : null;
       if (id === null) continue;
-      const plugin: InstalledPlugin = { id, name: id };
       const path = typeof rec['root'] === 'string' ? rec['root'] : undefined;
+      const marker = path === undefined ? null : readJson(join(path, '.plgnz-install.json'));
+      const markerId = marker?.['pluginId'];
+      const ownedId = typeof markerId === 'string' && (markerId === id || new RegExp(`^${escapeRegExp(id)}@[a-z0-9][a-z0-9._-]*$`, 'iu').test(markerId)) ? markerId : id;
+      const at = ownedId.indexOf('@');
+      const plugin: InstalledPlugin = { id: ownedId, name: at < 0 ? ownedId : ownedId.slice(0, at) };
+      if (at >= 0) plugin.marketplace = ownedId.slice(at + 1);
       if (path !== undefined && existsSync(path)) plugin.path = path;
       if (rec['enabled'] === false) plugin.enabled = false;
       out.push(plugin);
@@ -115,3 +120,5 @@ export const kimi: HostReader = {
     return entries;
   },
 };
+
+function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'); }
