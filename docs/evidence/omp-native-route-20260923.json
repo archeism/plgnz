@@ -21,13 +21,13 @@
     "source": "/Users/chaz/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js, installed OMP 18.1.4",
     "manual_policy": "The generic native skill layer maps disableModelInvocation to hidden and exposes explicit /skill:<name> use, but this is not the Agent Plugins marketplace route.",
     "marketplace_policy": "Personal's marketplace route uses the closed Agent Skills field set. Its observed behavior skips a skill with disable-model-invocation instead of preserving its manual-only semantics.",
-    "commands": "Native commands directory discovery is source-evidenced, but no loader proof establishes explicit invocation, arguments, resources, collision behavior, or update/remove lifecycle for marketplace-installed commands."
+    "commands": "Historical snapshot: native commands directory discovery was source-evidenced, but marketplace-installed command behavior had not yet been probed. Superseded for that question by docs/evidence/omp-command-discovery-20260923.json: an isolated OMP 18.1.4 marketplace install yielded no discovered command because marketplace roots are excluded before the OMP command provider."
   },
   "personal_selection": {
     "selected_by_hosts_yaml_or_default": ["addy", "karakeep", "mattpocock", "personal", "toolbox", "try-skill", "vercel"],
     "ordinary_strict_candidates": ["karakeep", "personal", "toolbox", "vercel"],
     "semantic_blockers": {
-      "addy": "contains commands/ and .claude/commands; OMP command lifecycle remains unverified",
+      "addy": "contains commands/ and .claude/commands; OMP marketplace command discovery is now proven unsupported (see omp-command-discovery-20260923.json)",
       "mattpocock": "contains manual-only skills carrying disable-model-invocation",
       "try-skill": "contains a manual-only skill carrying disable-model-invocation"
     },

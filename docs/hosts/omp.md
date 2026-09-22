@@ -83,9 +83,13 @@ default `pin` target. Rationale: `docs/pin-and-update.md`.
   durable registry/lock activation never rolls that activation back.
 - OMP 18.1.4's marketplace schema rejects `disable-model-invocation`.
   plgnz rejects that unsupported policy before mutation rather than stripping
-  it or treating OMP's standalone loader as marketplace support. Native
-  `commands/*.md` discovery is source-evidenced, but its explicit-only
-  lifecycle and collision behavior remain unverified and are not claimed.
+  it or treating OMP's standalone loader as marketplace support. The prior
+  source-only command note is now superseded by the isolated native proof in
+  [`evidence/omp-command-discovery-20260923.json`](../evidence/omp-command-discovery-20260923.json):
+  a marketplace-installed Agent Plugin's `commands/*.md` is excluded before
+  OMP's command provider, so manual-only skill → marketplace slash-command
+  conversion is unsupported. The standalone/configured-extension command
+  loader remains a different, out-of-scope route.
 - `omp plugin …` CLI is not used by this adapter; it activates the measured
   store layout directly.
 - Whether omp will read plugin `mcp.json` (spec §7.2.1) or a native

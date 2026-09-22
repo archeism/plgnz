@@ -54,7 +54,7 @@ function excludedStandalone(id: TargetId, surface: string, evidence: string, ver
 export const consumerProfiles: readonly ConsumerProfile[] = [
   profile('claude-code', 'Claude Code plugin loader', 'docs/hosts/claude-code.md', '2.1.275', active),
   profile('codex', 'Codex plugin loader', 'docs/evidence/codex-personal-20260922.json', '0.153.4', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
-  profile('omp', 'OMP native plugin loader', 'docs/hosts/omp.md', '18.1.4', { ...active, userOnlySkills: 'unsupported' }),
+  profile('omp', 'OMP native plugin loader', 'docs/hosts/omp.md', '18.1.4', { ...active, commandProjection: 'unsupported', userOnlySkills: 'unsupported' }),
   profile('dcode', 'deepagents-code plugin loader', 'docs/evidence/dcode-native-loader-20260922.json', '0.1.71', { ...active, commandProjection: 'unsupported', userOnlySkills: 'unsupported' }),
   pending('hermes', 'Hermes plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('openclaw', 'OpenClaw plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
