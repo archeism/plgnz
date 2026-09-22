@@ -21,6 +21,11 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
 
 ## Reader decisions
 
+- Before first install, an explicit `OPEN_PLUGIN_KIMI_BIN` that successfully
+  reports a current native version also establishes host presence. The writer
+  creates the selected root; missing, non-executable, legacy, or timed-out
+  binaries do not establish presence. The version probe is bounded to 10 seconds.
+
 - **Plugin MCP source priority**: inline `kimi.plugin.json`, then inline
   `.kimi-plugin/plugin.json` `mcpServers` (spec-style), then `.mcp.json`, then `mcp.json` — all read,
   identical entries deduped.

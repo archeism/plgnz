@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'bun:test';
 import { join } from 'node:path';
-import { chmodSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -16,7 +16,7 @@ import { runDoctor } from '../src/doctor';
 import { writers } from '../src/hosts/writers';
 import type { HostWriter } from '../src/host';
 import { CompatibilityError } from '../src/compatibility';
-import { withKimiNative } from './kimi-fixture';
+import { kimiNativeEnv, withKimiNative } from './kimi-fixture';
 
 const pluginsMap = {
   'plugin.json': JSON.stringify({ name: "new-plugin", mcpServers: { demo: { command: "demo" } } }, null, 2),
@@ -79,6 +79,37 @@ describe('add', () => {
       expect(state.find(r => r.id === 'new-plugin' && r.host === 'kimi') !== undefined).toBe(true);
       });
     });
+  });
+
+  test('kimi > explicit current binary installs before its selected native root exists', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'open-plugin-kimi-empty-root-'));
+    const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+    const root = join(home, '.kimi-code');
+    const saved = Object.fromEntries(['OPEN_PLUGIN_HOME', 'OPEN_PLUGIN_KIMI_ROOT', 'OPEN_PLUGIN_KIMI_BIN'].map(key => [key, process.env[key]]));
+    process.env.OPEN_PLUGIN_HOME = home;
+    process.env.OPEN_PLUGIN_KIMI_ROOT = root;
+    try {
+      process.env.OPEN_PLUGIN_KIMI_BIN = join(home, 'missing-kimi');
+      expect(kimi.detect()).toBe(false);
+      const nonExecutable = join(home, 'non-executable-kimi'); writeFileSync(nonExecutable, '#!/bin/sh\necho 2.0.1\n');
+      process.env.OPEN_PLUGIN_KIMI_BIN = nonExecutable;
+      expect(kimi.detect()).toBe(false);
+      const legacy = join(home, 'legacy-kimi'); writeFileSync(legacy, '#!/bin/sh\necho 0.16.0\n'); chmodSync(legacy, 0o755);
+      process.env.OPEN_PLUGIN_KIMI_BIN = legacy;
+      expect(kimi.detect()).toBe(false);
+      process.env.OPEN_PLUGIN_KIMI_BIN = kimiNativeEnv(home).OPEN_PLUGIN_KIMI_BIN;
+      expect(existsSync(root)).toBe(false);
+      expect(kimi.detect()).toBe(true);
+      initGitRepo(sourceDir, pluginsMap);
+      expect(await main(['add', sourceDir, '--target', 'kimi'])).toBe(0);
+      expect(kimi.listInstalled().some(plugin => plugin.name === 'new-plugin')).toBe(true);
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+      rmSync(home, { recursive: true, force: true });
+      rmSync(sourceDir, { recursive: true, force: true });
+    }
   });
 
   test('cursor > writes directory directly', async () => {

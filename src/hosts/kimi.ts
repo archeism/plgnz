@@ -25,6 +25,9 @@ import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
 import { kimiRoot } from '../paths';
 import { collectPluginServers, readJson, type PluginMcpCandidate, type RawServerDef } from '../mcp';
 
+declare const Bun: any;
+declare const TextDecoder: any;
+
 export function pluginsDir(): string {
   return join(kimiRoot(), 'plugins');
 }
@@ -51,7 +54,7 @@ export const kimi: HostReader = {
   gui: false,
 
   detect(): boolean {
-    return existsSync(kimiRoot());
+    return existsSync(kimiRoot()) || explicitCurrentKimiBinary();
   },
 
   stores(): string[] {
@@ -120,5 +123,18 @@ export const kimi: HostReader = {
     return entries;
   },
 };
+
+/** An explicit current native binary is sufficient presence evidence; its writer initializes the selected root. */
+function explicitCurrentKimiBinary(): boolean {
+  const binary = process.env['OPEN_PLUGIN_KIMI_BIN'];
+  if (!binary || !existsSync(binary)) return false;
+  try {
+    const result = Bun.spawnSync([binary, '--version'], { stdout: 'pipe', stderr: 'pipe', timeout: 10_000 });
+    if (result.exitCode !== 0 || !(result.stdout instanceof Uint8Array)) return false;
+    const version = new TextDecoder().decode(result.stdout).trim();
+    const match = /^(\d+)\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.exec(version);
+    return match !== null && Number(match[1]) > 0;
+  } catch { return false; }
+}
 
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'); }
