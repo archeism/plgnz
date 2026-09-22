@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "open-plugin",
+      "name": "plgnz",
       "dependencies": {
         "smol-toml": "^1.8.0",
       },

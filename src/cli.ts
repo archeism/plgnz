@@ -12,9 +12,9 @@ import type { InstallRecord } from './state';
 import { runPin } from './pin';
 import { runUpdate } from './update';
 
-const USAGE = `open-plugin — install, diagnose and update agent plugins and MCP configs
+const USAGE = `plgnz — install, diagnose and update agent plugins and MCP configs
 
-usage: open-plugin <verb> [options]
+usage: plgnz <verb> [options]
 
 verbs:
   add <source> [--target <host>…]   install a plugin into each host's native store
@@ -78,7 +78,7 @@ export async function main(argv: string[]): Promise<number> {
     return verb === undefined ? 2 : 0;
   }
   if (verb === 'doctor') {
-    if (args.length > 1) fail(`open-plugin doctor: unexpected argument: ${args[1]}`, 2);
+    if (args.length > 1) fail(`plgnz doctor: unexpected argument: ${args[1]}`, 2);
     const { findings, exitCode } = runDoctor();
     if (json) console.log(JSON.stringify(findings, null, 2));
     else for (const f of findings) console.log(formatFinding(f));
@@ -112,7 +112,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (verb === 'remove') {
     const target = args[1];
-    if (!target) fail(`open-plugin remove: missing plugin id`, 2);
+    if (!target) fail(`plgnz remove: missing plugin id`, 2);
     let state = readState();
     for (const w of writers) {
       if (!w.detect()) continue;
@@ -124,9 +124,9 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (verb === 'add') {
     const flags = parseFlags(args.slice(1));
-    if (flags.positionals.length > 1) fail(`open-plugin add: unexpected argument: ${flags.positionals[1]}`, 2);
+    if (flags.positionals.length > 1) fail(`plgnz add: unexpected argument: ${flags.positionals[1]}`, 2);
     const sourceArg = flags.positionals[0];
-    if (sourceArg === undefined) fail(`open-plugin add: missing source`, 2);
+    if (sourceArg === undefined) fail(`plgnz add: missing source`, 2);
 
     try {
       const resolved = resolveSource(sourceArg);
@@ -164,11 +164,11 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (verb === 'pin') {
     const flags = parseFlags(args.slice(1));
-    if (flags.positionals.length > 0) fail(`open-plugin pin: unexpected argument: ${flags.positionals[0]}`, 2);
+    if (flags.positionals.length > 0) fail(`plgnz pin: unexpected argument: ${flags.positionals[0]}`, 2);
     const known = new Set(writers.map((w) => w.id));
     for (const target of flags.targets) {
       if (!known.has(target)) {
-        fail(`open-plugin pin: unknown target '${target}' (known: ${[...known].join(', ')})`, 2);
+        fail(`plgnz pin: unknown target '${target}' (known: ${[...known].join(', ')})`, 2);
       }
     }
     const result = await runPin({ targets: flags.targets, all: flags.all, dryRun: flags.dryRun });
@@ -177,13 +177,13 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (verb === 'update') {
     const flags = parseFlags(args.slice(1));
-    if (flags.positionals.length > 1) fail(`open-plugin update: unexpected argument: ${flags.positionals[1]}`, 2);
+    if (flags.positionals.length > 1) fail(`plgnz update: unexpected argument: ${flags.positionals[1]}`, 2);
     const result = await runUpdate(flags.positionals[0], { dryRun: flags.dryRun });
     printFindings(result.findings, json);
     return result.exitCode;
   }
 
-  fail(`open-plugin: unknown verb '${verb}'\n\n${USAGE}`, 2);
+  fail(`plgnz: unknown verb '${verb}'\n\n${USAGE}`, 2);
 }
 
 if (process.argv[1] !== undefined && process.argv[1].endsWith('cli.ts')) {

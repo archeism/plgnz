@@ -30,7 +30,7 @@ plus `.cursor-plugin/plugin.json` (omas issue #284).
   distinguishable from evidence; reading both covers either.
 - **GUI host**: `launchctl getenv PATH` is unset, so a bare command cannot be
   assumed to resolve (spec §7.2.1 makes PATH participation client-defined).
-  Doctor flags bare commands `!` with `run open-plugin pin`; `pin` rewrites
+  Doctor flags bare commands `!` with `run plgnz pin`; `pin` rewrites
   them to absolute paths.
 - **Shadow semantics (measured)**: a user-level entry and a plugin server of
   the same name both load and duplicate (Cursor runs the plugin one as

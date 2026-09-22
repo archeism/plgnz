@@ -1,5 +1,5 @@
 /**
- * `open-plugin doctor` — read-only diagnosis.
+ * `plgnz doctor` — read-only diagnosis.
  *
  * Read-only by construction: this module imports only the readers-only host
  * registry (src/hosts/index.ts) — no writer module loads with it — and
@@ -12,7 +12,7 @@
  *      config AND in each installed plugin's mcp.json/.mcp.json: a command
  *      containing `/` must exist and be executable; a bare command is
  *      resolved on this process's PATH. On GUI hosts (cursor) a bare command
- *      is additionally flagged `!` with the hint `run open-plugin pin` —
+ *      is additionally flagged `!` with the hint `run plgnz pin` —
  *      macOS GUI apps have no shell PATH (spec §7.2.1 makes PATH
  *      participation client-defined).
  *  (2) shadow / duplicate — the same server name in a host's user-level MCP
@@ -85,7 +85,7 @@ function checkCommands(host: HostReader, entries: McpServerEntry[], out: DoctorF
         out.push({
           host: host.id,
           mark: '!',
-          message: `server '${entry.name}': command contains placeholder ${result.unknown} that open-plugin cannot expand — not verified (${label})${suffix}`,
+          message: `server '${entry.name}': command contains placeholder ${result.unknown} that plgnz cannot expand — not verified (${label})${suffix}`,
         });
         continue;
       }
@@ -117,7 +117,7 @@ function checkCommands(host: HostReader, entries: McpServerEntry[], out: DoctorF
             mark: '!',
             message:
               `server '${entry.name}': bare command '${entry.command}' may not resolve — macOS GUI apps have no shell PATH ` +
-              `(spec §7.2.1); run open-plugin pin${suffix}`,
+              `(spec §7.2.1); run plgnz pin${suffix}`,
           });
         }
       } else if (resolved !== null) {

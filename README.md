@@ -1,12 +1,12 @@
-# open-plugin
+# plgnz
 
 Open-source installer **and doctor** for agent plugins (Agent Plugins / OpenPlugin spec 1.0.0) and MCP configs — Claude Code, Codex, Cursor, Kimi, and more.
 
 ```
-npx open-plugin add <marketplace-or-git-url>   # into each host's native plugin store
-npx open-plugin doctor                          # dead commands, shadowed entries, stale installs
-npx open-plugin pin                             # absolute command paths for GUI hosts
-npx open-plugin update                          # re-add from the recorded source, re-pin
+npx plgnz add <marketplace-or-git-url>   # into each host's native plugin store
+npx plgnz doctor                          # dead commands, shadowed entries, stale installs
+npx plgnz pin                             # absolute command paths for GUI hosts
+npx plgnz update                          # re-add from the recorded source, re-pin
 ```
 
 `pin` rewrites a plugin's bare stdio `command` to the absolute path it resolves
@@ -18,4 +18,6 @@ tool did not install. Details: `docs/pin-and-update.md`.
 
 Why another tool: `npx plugins` is closed-source and its Cursor target does not install into Cursor; nothing in the ecosystem checks that an installed plugin still *works*. See `docs/research/`.
 
-Status: pre-alpha, scaffolding in progress.
+Status: pre-alpha, scaffolding in progress. Requires Bun on PATH; the CLI runs under Bun.
+
+Published on npm as `plgnz`; source repository: `archeism/plgnz`.

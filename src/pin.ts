@@ -1,5 +1,5 @@
 /**
- * `open-plugin pin` — make plugin-provided MCP servers launchable from a GUI
+ * `plgnz pin` — make plugin-provided MCP servers launchable from a GUI
  * host.
  *
  * A GUI-launched host (cursor) has no shell PATH, so a bare `command` in a
@@ -17,7 +17,7 @@
  *     bare: a wrong absolute path would be worse than a bare one.
  *   - What was pinned is recorded in the install ledger (`state.json`), so
  *     `update` can re-apply it after re-adding a copy that restores the
- *     source's bare command. Plugins open-plugin did not install have no
+ *     source's bare command. Plugins plgnz did not install have no
  *     record to write to; that is reported (`!`), not invented.
  *
  * The absolute-path form is not one of the two spec §7.2.1 allows in a
@@ -97,7 +97,7 @@ export async function runPin(options: PinRunOptions = {}): Promise<PinRunResult>
           host: host.id,
           mark: '!',
           message:
-            `plugin '${plugin.id}' has no record in state.json — pinned, but open-plugin did not install it, ` +
+            `plugin '${plugin.id}' has no record in state.json — pinned, but plgnz did not install it, ` +
             `so update will not restore the pin`,
         });
         continue;

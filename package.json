@@ -1,21 +1,21 @@
 {
-  "name": "open-plugin",
+  "name": "plgnz",
   "version": "0.0.0",
   "description": "Install, diagnose and update agent plugins (Agent Plugins spec) and MCP configs across Claude Code, Codex, Cursor, Kimi and more",
   "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/archeism/open-plugin.git"
+    "url": "git+https://github.com/archeism/plgnz.git"
   },
   "bin": {
-    "open-plugin": "./bin/open-plugin.mjs"
+    "plgnz": "./bin/plgnz.mjs"
   },
   "scripts": {
     "test": "bun test",
     "check": "tsc --noEmit"
   },
-  "files": ["bin", "dist", "README.md", "LICENSE"],
+  "files": ["bin", "src", "README.md", "LICENSE"],
   "dependencies": {
     "smol-toml": "^1.8.0"
   },

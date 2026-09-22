@@ -164,7 +164,7 @@ describe('pin · CLI', () => {
   test('`pin --target cursor` exits 1 on an unresolvable bare command', () => {
     const { home, env } = materialize('cursor');
     writeCursorPlugin(home, 'pinned-plugin', { 'ghost-tool': { type: 'stdio', command: 'open-plugin-no-such-command' } });
-    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'pin', '--target', 'cursor'], {
+    const r = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'pin', '--target', 'cursor'], {
       encoding: 'utf8',
       env: { ...process.env, ...env },
     });
@@ -174,7 +174,7 @@ describe('pin · CLI', () => {
 
   test('`pin --target <unknown host>` is a usage error', () => {
     const { env } = materialize('cursor');
-    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'pin', '--target', 'nope'], {
+    const r = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'pin', '--target', 'nope'], {
       encoding: 'utf8',
       env: { ...process.env, ...env },
     });

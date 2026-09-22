@@ -1,5 +1,5 @@
 /**
- * `open-plugin update [name]` — bring installed plugins up to their source.
+ * `plgnz update [name]` — bring installed plugins up to their source.
  *
  * The ledger (`state.json`) is the whole authority here. `update` walks the
  * records *this tool wrote* — never the host stores — and for each one:
@@ -13,7 +13,7 @@
  *      source's bare `command` again.
  *
  * A plugin with no record — one another tool installed — is reported, never
- * modified: open-plugin has no basis for saying what "up to date" means for it,
+ * modified: plgnz has no basis for saying what "up to date" means for it,
  * and a re-add would silently take ownership of someone else's install.
  */
 import type { HostWriter, InstalledPlugin } from './host';
@@ -65,15 +65,15 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
   const records = name === undefined ? state : state.filter((r) => r.id === name || idName(r.id) === name);
   if (name !== undefined && records.length === 0) {
     findings.push({
-      host: 'open-plugin',
+      host: 'plgnz',
       mark: '✗',
-      message: `no install record for '${name}' in state.json — not installed by open-plugin; refusing to modify it`,
+      message: `no install record for '${name}' in state.json — not installed by plgnz; refusing to modify it`,
     });
     return { findings, exitCode: 1 };
   }
   if (records.length === 0) {
     findings.push({
-      host: 'open-plugin',
+      host: 'plgnz',
       mark: '!',
       message: 'nothing to update — state.json has no install records',
     });

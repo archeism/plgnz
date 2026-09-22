@@ -1,6 +1,6 @@
 # pin and update
 
-Two verbs that act on installs **open-plugin knows about**, plus the
+Two verbs that act on installs **plgnz knows about**, plus the
 `state.json` fields they share. Code: `src/pin.ts`, `src/update.ts`,
 `src/mcp.ts` (`pinPluginMcpFiles`), one `pin()` per host module.
 
@@ -47,14 +47,14 @@ to the plugin copy or to the ledger.
 ### What gets recorded
 
 `state.json` gains a per-install `pins: ["<server>", …]` (sorted) for installs
-open-plugin made. That is the only reason `update` can restore a pin: a fresh
+plgnz made. That is the only reason `update` can restore a pin: a fresh
 copy carries the source's bare command again.
 
 A plugin with **no** ledger record is still pinned — the repair is about
 launchability, not ownership — but the run reports `!` that the pin is not
 recorded and will not survive a re-install by whichever tool owns it. No
 record is invented for it: a pins-only entry would make `update` try to re-add
-a plugin whose source open-plugin does not know.
+a plugin whose source plgnz does not know.
 
 ## `update`
 
@@ -76,7 +76,7 @@ re-applies the recorded pins:
 
 Refusals:
 
-- `name` given, no record → `✗ … refusing to modify it`, exit 1. open-plugin
+- `name` given, no record → `✗ … refusing to modify it`, exit 1. plgnz
   has no basis for calling another tool's install up to date, and a re-add
   would quietly take ownership of it.
 - source gone or no longer providing the plugin → `✗`, exit 1, store untouched.

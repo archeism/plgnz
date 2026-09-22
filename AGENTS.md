@@ -1,6 +1,6 @@
-# AGENTS.md · open-plugin
+# AGENTS.md · plgnz
 
-`open-plugin` installs, diagnoses and updates agent plugins (Agent Plugins / "OpenPlugin" spec 1.0.0) and MCP configs across coding-agent hosts. It is the open-source counterpart of `npx plugins`, plus the verbs that tool lacks: `doctor`, `pin`, `update`.
+`plgnz` installs, diagnoses and updates agent plugins (Agent Plugins / "OpenPlugin" spec 1.0.0) and MCP configs across coding-agent hosts. It is the open-source counterpart of `npx plugins`, plus the verbs that tool lacks: `doctor`, `pin`, `update`.
 
 ## Verbs
 - `add <source> [--target <host>…]` — install a plugin from a marketplace dir or git URL into each host's **native** store.

@@ -144,7 +144,7 @@ describe('doctor · cursor', () => {
       const result = runDoctor([cursor]);
       expect(
         result.findings.some(
-          (f) => f.mark === '!' && f.message.includes('bare-gui-server') && f.message.includes('run open-plugin pin'),
+          (f) => f.mark === '!' && f.message.includes('bare-gui-server') && f.message.includes('run plgnz pin'),
         ),
       ).toBe(true);
     });
@@ -184,7 +184,7 @@ describe('doctor · omp', () => {
         join(home, '.mcp.json'),
         JSON.stringify({
           $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
-          mcpServers: { 'repo-dead-server': { type: 'stdio', command: '/nonexistent/open-plugin/repo-server' } },
+          mcpServers: { 'repo-dead-server': { type: 'stdio', command: '/nonexistent/plgnz/repo-server' } },
         }),
       );
       const prevCwd = process.cwd();
@@ -242,11 +242,11 @@ describe('doctor · git-URL sources', () => {
   });
 
   test('gitRemoteHead resolves a remote head (file:// stand-in), null when unreachable', () => {
-    const home = mkdtempSync(join(tmpdir(), 'open-plugin-remote-'));
+    const home = mkdtempSync(join(tmpdir(), 'plgnz-remote-'));
     const repo = join(home, 'repo');
     const head = initGitRepo(repo, { 'plugin.json': '{"name":"demo-plugin"}\n' });
     expect(gitRemoteHead(`file://${repo}`)).toBe(head);
-    expect(gitRemoteHead('file:///nonexistent-open-plugin/repo')).toBe(null);
+    expect(gitRemoteHead('file:///nonexistent-plgnz/repo')).toBe(null);
   });
 
   test('ledger source at remote head → ✓; behind remote head → ✗ stale', () => {
@@ -273,7 +273,7 @@ describe('doctor · git-URL sources', () => {
       writeLedger(home, [
         { host: 'claude-code', id: 'demo-plugin@demo-market', source: FAKE_URL, sourceSha: '0'.repeat(40) },
       ]);
-      withUrlRedirect('file:///nonexistent-open-plugin/repo', () => {
+      withUrlRedirect('file:///nonexistent-plgnz/repo', () => {
         const result = runDoctor([claudeCode]);
         expect(
           result.findings.some(
@@ -287,9 +287,9 @@ describe('doctor · git-URL sources', () => {
 });
 
 describe('doctor · CLI', () => {
-  test('bin/open-plugin.mjs doctor --json exits 1 with ✗ findings', () => {
+  test('bin/plgnz.mjs doctor --json exits 1 with ✗ findings', () => {
     const { home, env } = materialize('codex');
-    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'doctor', '--json'], {
+    const r = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'doctor', '--json'], {
       encoding: 'utf8',
       env: { ...process.env, ...env },
     });
@@ -299,9 +299,9 @@ describe('doctor · CLI', () => {
   });
 
   test('an unknown verb exits 2 with the usage text', () => {
-    const r = spawnSync('bun', [join(repoRoot, 'bin', 'open-plugin.mjs'), 'frobnicate'], {
+    const r = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'frobnicate'], {
       encoding: 'utf8',
-      env: { ...process.env, OPEN_PLUGIN_HOME: '/nonexistent-open-plugin-home' },
+      env: { ...process.env, OPEN_PLUGIN_HOME: '/nonexistent-plgnz-home' },
     });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain('unknown verb');
