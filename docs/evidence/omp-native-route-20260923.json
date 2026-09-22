@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-23",
+  "scope": "OMP native-plugin route readiness for Personal cutover. All mutations used temporary directories; no model request, authentication, real OMP home, marketplace, or Personal checkout was changed.",
+  "host": "Charless-MacBook-Air",
+  "native_cli": {
+    "path": "/Users/chaz/.bun/bin/omp",
+    "version": "18.1.4",
+    "isolated_state": "HOME and PI_CONFIG_DIR were temporary paths",
+    "commands": [
+      "omp plugin marketplace add <temporary collection> --json",
+      "omp plugin install demo@audit --scope user --json",
+      "omp plugin list --json"
+    ],
+    "result": "All three exited 0. The list reported demo@audit at a temporary cache path; no real ~/.omp profile was created. This proves marketplace registration, ordinary-plugin install, and native registry readback only."
+  },
+  "plgnz_isolated_probe": {
+    "command": "OPEN_PLUGIN_HOME=<temporary> OPEN_PLUGIN_OMP_ROOT=<temporary> bun run src/cli.ts add <temporary ordinary collection> --target omp --json; list; doctor",
+    "result": "add, list, and doctor exited 0. doctor returned a current-content check for demo@audit. bun test test/omp-lifecycle.test.ts also passed: 6 pass, 0 fail."
+  },
+  "loader_boundary": {
+    "source": "/Users/chaz/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js, installed OMP 18.1.4",
+    "manual_policy": "The generic native skill layer maps disableModelInvocation to hidden and exposes explicit /skill:<name> use, but this is not the Agent Plugins marketplace route.",
+    "marketplace_policy": "Personal's marketplace route uses the closed Agent Skills field set. Its observed behavior skips a skill with disable-model-invocation instead of preserving its manual-only semantics.",
+    "commands": "Native commands directory discovery is source-evidenced, but no loader proof establishes explicit invocation, arguments, resources, collision behavior, or update/remove lifecycle for marketplace-installed commands."
+  },
+  "personal_selection": {
+    "selected_by_hosts_yaml_or_default": ["addy", "karakeep", "mattpocock", "personal", "toolbox", "try-skill", "vercel"],
+    "ordinary_strict_candidates": ["karakeep", "personal", "toolbox", "vercel"],
+    "semantic_blockers": {
+      "addy": "contains commands/ and .claude/commands; OMP command lifecycle remains unverified",
+      "mattpocock": "contains manual-only skills carrying disable-model-invocation",
+      "try-skill": "contains a manual-only skill carrying disable-model-invocation"
+    },
+    "note": "A strict projection can make the manual-policy packages pass the writer's structural check only by removing the policy. That is not native semantic support and is not a valid cutover."
+  },
+  "adoption": {
+    "existing_real_store": "The current OMP registry lists all seven Personal packages as user installs, with no .plgnz-install.json ownership markers.",
+    "adapter_gap": "ompWriter neither advertises supportsAdoption nor implements opts.adoptExisting. Its prior-user-row and cache checks reject every legacy Personal install."
+  },
+  "decision": "The OMP adapter is ready for isolated ordinary-plugin lifecycle only. Native-only consolidation is blocked until legacy-install adoption is implemented and the manual-policy and Addy-command semantics have native marketplace evidence. Keep the existing OMP route for those blocked packages; do not project manual skills as ordinary skills."
+}
