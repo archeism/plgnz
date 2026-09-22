@@ -61,6 +61,15 @@ are left alone. Root-wrapper changes, cache activation, registry, settings, and
 known-marketplace metadata share a rollback boundary, including post-stage
 registration refusal.
 
+`add --adopt-existing` has a narrower migration path for one unmarked native
+user install. Its registry row must point directly under the selected native
+cache slot, contain no symlinks, and agree with the selected plugin's native
+name and version. plgnz stages a marked sibling named `<version>.plgnz`, then
+atomically repoints the user row and enabled setting. The old unmarked directory
+is neither marked nor deleted, including on later refreshes. Adoption never
+claims or rewrites the existing marketplace wrapper or known-marketplace source:
+Claude continues to load through the registry's newly marked `installPath`.
+
 Tests set `OPEN_PLUGIN_CLAUDE_CODE_ROOT` to an isolated temporary root. The
 adapter never writes `~/.claude.json`; user-level MCP entries remain reader
 only. `pin` only rewrites plugin-local `.mcp.json` / `mcp.json` files.

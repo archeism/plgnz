@@ -250,17 +250,40 @@ describe('add', () => {
     });
   });
 
-  test('refuses --adopt-existing on an unsupported selected host before source or state writes', async () => {
+  test('claude-code accepts --adopt-existing in a public dry-run without state writes', async () => {
     await withHostEnvAsync('claude-code', async () => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+      initGitRepo(sourceDir, pluginsMap);
       const output: string[] = [];
       const originalLog = console.log;
       console.log = (value: string) => output.push(value);
       try {
-        expect(await main(['add', '/not/read', '--target', 'claude-code', '--adopt-existing', '--json'])).toBe(2);
+        expect(await main(['add', sourceDir, '--target', 'claude-code', '--adopt-existing', '--dry-run', '--json'])).toBe(0);
       } finally { console.log = originalLog; }
-      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; diagnostic?: string }>;
-      expect(outcomes).toEqual([{ plugin: '*', target: 'claude-code', status: 'unsupported', action: 'install', dryRun: false, diagnostic: "target 'claude-code' does not support --adopt-existing" }]);
+      const outcomes = JSON.parse(output.join('')) as Array<{ plugin: string; target: string; status: string; dryRun: boolean }>;
+      expect(outcomes).toEqual([{ plugin: 'new-plugin', target: 'claude-code', status: 'installed', action: 'install', dryRun: true, nativeId: 'new-plugin' }]);
       expect(readState()).toEqual([]);
+    });
+  });
+
+  test('claude-code accepts repeated public adoption for its already-owned native install', async () => {
+    await withHostEnvAsync('claude-code', async (home) => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+      initGitRepo(sourceDir, { ...pluginsMap, 'plugin.json': JSON.stringify({ name: 'new-plugin', version: '1.0.0' }) });
+      const legacy = join(home, '.claude/plugins/cache/local/new-plugin/1.0.0');
+      mkdirSync(legacy, { recursive: true });
+      writeFileSync(join(legacy, 'plugin.json'), JSON.stringify({ name: 'new-plugin', version: '1.0.0' }));
+      mkdirSync(join(legacy, '.claude-plugin'), { recursive: true });
+      writeFileSync(join(legacy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'new-plugin', version: '1.0.0', skills: './skills/' }));
+      writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'new-plugin@local': [{ scope: 'user', installPath: legacy, version: '1.0.0' }] } }));
+      expect(await main(['add', sourceDir, '--target', 'claude-code', '--adopt-existing'])).toBe(0);
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['add', sourceDir, '--target', 'claude-code', '--adopt-existing', '--json'])).toBe(0);
+      } finally { console.log = originalLog; }
+      expect(JSON.parse(output.join(''))).toEqual([{ plugin: 'new-plugin', target: 'claude-code', status: 'unchanged', action: 'install', dryRun: false, nativeId: 'new-plugin' }]);
     });
   });
 

@@ -81,8 +81,8 @@ describe('claude-code lifecycle', () => {
       const wrapper = join(root, 'plugins/marketplaces/.plgnz-local');
       writeFiles(wrapper, { 'foreign.txt': 'keep\n' });
       const wrapperBefore = readFileSync(join(wrapper, 'foreign.txt'), 'utf8');
-      for (const dryRun of [true, false]) {
-        expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved, dryRun ? { dryRun } : undefined))).message).toContain('wrapper');
+      for (const opts of [{ dryRun: true }, { dryRun: true, adoptExisting: true }, undefined]) {
+        expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved, opts))).message).toContain('wrapper');
         expect(readFileSync(join(wrapper, 'foreign.txt'), 'utf8')).toBe(wrapperBefore);
       }
 
@@ -90,8 +90,8 @@ describe('claude-code lifecycle', () => {
       const known = join(root, 'plugins/known_marketplaces.json');
       writeFileSync(known, JSON.stringify({ local: { source: { source: 'directory', path: '/foreign' }, installLocation: '/foreign' } }));
       const knownBefore = readFileSync(known, 'utf8');
-      for (const dryRun of [true, false]) {
-        expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved, dryRun ? { dryRun } : undefined))).message).toContain('different source');
+      for (const opts of [{ dryRun: true }, { dryRun: true, adoptExisting: true }, undefined]) {
+        expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved, opts))).message).toContain('different source');
         expect(readFileSync(known, 'utf8')).toBe(knownBefore);
       }
     });
@@ -103,6 +103,57 @@ describe('claude-code lifecycle', () => {
       writeFiles(join(root, 'plugins/cache/personal/addy/0.1.0'), { 'foreign.txt': 'keep\n' });
       expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved, { dryRun: true }))).message).toContain('unowned');
       expect(readFileSync(join(root, 'plugins/cache/personal/addy/0.1.0/foreign.txt'), 'utf8')).toBe('keep\n');
+    });
+  });
+
+  test('adopts one exact unmarked native user install into a marked sibling without deleting the prior cache', async () => {
+    await isolated(async root => {
+      const incoming = fixture({ 'resources/value.txt': 'incoming\n' });
+      const legacy = join(root, 'plugins/cache/personal/addy/0.1.0');
+      writeFiles(legacy, {
+        'plugin.json': '{"name":"addy","version":"0.1.0"}',
+        '.claude-plugin/plugin.json': '{"name":"addy","version":"0.1.0","skills":"./skills/"}',
+        'resources/value.txt': 'native-old\n',
+      });
+      const registry = join(root, 'plugins/installed_plugins.json');
+      writeFiles(join(root, 'plugins'), { 'installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'addy@personal': [{ scope: 'user', installPath: legacy, version: '0.1.0' }] } }) });
+      const marketplaces = join(root, 'plugins/known_marketplaces.json');
+      writeFileSync(marketplaces, JSON.stringify({ personal: { source: { source: 'directory', path: '/native-personal' }, installLocation: '/native-personal' } }));
+      const marketplacesBefore = readFileSync(marketplaces, 'utf8');
+
+      await claudeCodeWriter.add(incoming.plugin, incoming.resolved, { dryRun: true, adoptExisting: true });
+      expect(existsSync(join(root, 'plugins/cache/personal/addy/0.1.0.plgnz'))).toBe(false);
+      expect(readFileSync(join(legacy, 'resources/value.txt'), 'utf8')).toBe('native-old\n');
+      expect(readFileSync(marketplaces, 'utf8')).toBe(marketplacesBefore);
+
+      await claudeCodeWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true });
+      const adopted = join(root, 'plugins/cache/personal/addy/0.1.0.plgnz');
+      expect(existsSync(join(legacy, '.plgnz-install.json'))).toBe(false);
+      expect(readFileSync(join(legacy, 'resources/value.txt'), 'utf8')).toBe('native-old\n');
+      expect(existsSync(join(adopted, '.plgnz-install.json'))).toBe(true);
+      expect(JSON.parse(readFileSync(registry, 'utf8')).plugins['addy@personal'][0].installPath).toBe(adopted);
+      expect(readFileSync(marketplaces, 'utf8')).toBe(marketplacesBefore);
+      expect(await claudeCodeWriter.add(incoming.plugin, incoming.resolved)).toBe('unchanged');
+      expect(readFileSync(marketplaces, 'utf8')).toBe(marketplacesBefore);
+      expect(await claudeCodeWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true })).toBe('unchanged');
+      incoming.resolved.sha = '0.1.0-next';
+      incoming.plugin.contentFingerprint = 'next';
+      await claudeCodeWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true });
+      expect(JSON.parse(readFileSync(registry, 'utf8')).plugins['addy@personal'][0].installPath).toBe(join(root, 'plugins/cache/personal/addy/0.1.0-next'));
+      expect(existsSync(legacy)).toBe(true);
+      expect(readFileSync(marketplaces, 'utf8')).toBe(marketplacesBefore);
+    });
+  });
+
+  test('refuses adoption when the unmarked user root lacks the selected native identity', async () => {
+    await isolated(async root => {
+      const incoming = fixture({});
+      const legacy = join(root, 'plugins/cache/personal/addy/0.1.0');
+      writeFiles(legacy, { '.claude-plugin/plugin.json': '{"name":"other","version":"0.1.0"}', 'foreign.txt': 'keep\n' });
+      writeFiles(join(root, 'plugins'), { 'installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'addy@personal': [{ scope: 'user', installPath: legacy, version: '0.1.0' }] } }) });
+      expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true }))).message).toContain('identity');
+      expect(readFileSync(join(legacy, 'foreign.txt'), 'utf8')).toBe('keep\n');
+      expect(existsSync(join(root, 'plugins/cache/personal/addy/0.1.0.plgnz'))).toBe(false);
     });
   });
 

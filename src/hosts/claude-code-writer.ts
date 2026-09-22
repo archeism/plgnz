@@ -9,18 +9,17 @@ import { pinPluginMcpFiles } from '../mcp-write';
 
 const OWNERSHIP = '.plgnz-install.json';
 declare const Bun: { CryptoHasher: new (algorithm: 'sha256') => { update(input: string | Uint8Array): void; digest(encoding: 'hex'): string } };
-type Ownership = { source: string; pluginId: string; fingerprint: string };
+type Ownership = { source: string; pluginId: string; fingerprint: string; adopted?: true };
 type Registry = { version: number; plugins: Record<string, unknown> };
 
 export const claudeCodeWriter: HostWriter = {
   ...claudeCode,
-  supportsAdoption: false,
+  supportsAdoption: true,
   async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void | 'unchanged'> {
     const marketplace = plugin.marketplace || 'local';
     const id = `${plugin.name}@${marketplace}`;
     const version = resolved.sha;
     const slot = join(pluginsDir(), 'cache', marketplace, plugin.name);
-    const target = join(slot, version);
     const registryFile = join(pluginsDir(), 'installed_plugins.json');
     const settingsFile = join(pluginsDir(), '..', 'settings.json');
     const marketplacesFile = join(pluginsDir(), 'known_marketplaces.json');
@@ -28,10 +27,18 @@ export const claudeCodeWriter: HostWriter = {
     const settings = readSettings(settingsFile);
     const marketplaces = readMarketplaces(marketplacesFile);
     assertManagedCache(slot);
+    const alreadyOwned = hasAdoptedRegistryInstall(registry, id, resolved.sourceUri, slot);
+    const legacy = opts?.adoptExisting && !alreadyOwned ? validateLegacyUserInstall(registry, id, slot, plugin) : undefined;
+    const owned = ownedRegistryTarget(registry, id, resolved.sourceUri, slot, version);
+    const preserveNativeMarketplace = legacy !== undefined || alreadyOwned;
+    const target = owned ??
+      (legacy !== undefined && existsSync(join(slot, version)) && readOwnership(join(slot, version)) === null
+        ? join(slot, `${version}.plgnz`)
+        : join(slot, version));
     const existing = readOwnership(target);
     assertTargetIsReplaceable(target, existing, id, resolved.sourceUri);
-    assertNoForeignRegistryEntry(registry, id, target, resolved.sourceUri);
-    validateMarketplaceRegistration(marketplaces, marketplace, resolved.sourceUri, plugin);
+    assertNoForeignRegistryEntry(registry, id, target, resolved.sourceUri, legacy);
+    if (!preserveNativeMarketplace) validateMarketplaceRegistration(marketplaces, marketplace, resolved.sourceUri, plugin);
     if (opts?.dryRun) {
       const stage = mkdtempSync(join(tmpdir(), 'plgnz-claude-dry-run-'));
       try { stagePlugin(plugin.dir, stage, plugin.name, version); }
@@ -43,22 +50,22 @@ export const claudeCodeWriter: HostWriter = {
     mkdirSync(slot, { recursive: true });
     assertManagedCache(slot);
     const stage = mkdtempSync(join(slot, '.plgnz-stage-'));
-    const wrapper = !existsSync(join(resolved.sourceUri, '.claude-plugin', 'marketplace.json')) ? join(pluginsDir(), 'marketplaces', `.plgnz-${marketplace}`) : undefined;
+    const wrapper = !preserveNativeMarketplace && !existsSync(join(resolved.sourceUri, '.claude-plugin', 'marketplace.json')) ? join(pluginsDir(), 'marketplaces', `.plgnz-${marketplace}`) : undefined;
     const wrapperSnapshot = wrapper === undefined ? undefined : snapshotDirectory(wrapper);
     let durable = false;
     try {
       stagePlugin(plugin.dir, stage, plugin.name, version);
-      const nextMarketplaces = marketplacesWithLocalSource(marketplaces, marketplace, resolved.sourceUri, plugin);
-      writeFileSync(join(stage, OWNERSHIP), JSON.stringify({ source: resolved.sourceUri, pluginId: id, fingerprint: plugin.contentFingerprint ?? '' }));
+      const nextMarketplaces = preserveNativeMarketplace ? undefined : marketplacesWithLocalSource(marketplaces, marketplace, resolved.sourceUri, plugin);
+      writeFileSync(join(stage, OWNERSHIP), JSON.stringify({ source: resolved.sourceUri, pluginId: id, fingerprint: plugin.contentFingerprint ?? '', ...(preserveNativeMarketplace ? { adopted: true } : {}) }));
       const unchanged = existing !== null && existing.fingerprint === (plugin.contentFingerprint ?? '') && sameTree(stage, target);
       if (unchanged) {
         try {
           writeRegistry(registryFile, registryWithEntry(registry, id, target, version, resolved));
           writeSettings(settingsFile, settingsWithEnabled(settings, id, true));
-          writeMarketplaces(marketplacesFile, nextMarketplaces);
+          if (nextMarketplaces !== undefined) writeMarketplaces(marketplacesFile, nextMarketplaces);
           durable = true;
         } catch (error) {
-          restoreMetadata(registryFile, registry, settingsFile, settings, marketplacesFile, marketplaces);
+          restoreMetadata(registryFile, registry, settingsFile, settings, nextMarketplaces === undefined ? undefined : marketplacesFile, nextMarketplaces === undefined ? undefined : marketplaces);
           throw error;
         }
         return 'unchanged';
@@ -68,11 +75,11 @@ export const claudeCodeWriter: HostWriter = {
         activation = activate(stage, target, slot);
         writeRegistry(registryFile, registryWithEntry(registry, id, target, version, resolved));
         writeSettings(settingsFile, settingsWithEnabled(settings, id, true));
-        writeMarketplaces(marketplacesFile, nextMarketplaces);
+        if (nextMarketplaces !== undefined) writeMarketplaces(marketplacesFile, nextMarketplaces);
         durable = true;
       } catch (error) {
         activation?.rollback();
-        restoreMetadata(registryFile, registry, settingsFile, settings, marketplacesFile, marketplaces);
+        restoreMetadata(registryFile, registry, settingsFile, settings, nextMarketplaces === undefined ? undefined : marketplacesFile, nextMarketplaces === undefined ? undefined : marketplaces);
         throw error;
       }
       // The registry is durable before old cache content is discarded. A cleanup
@@ -356,15 +363,57 @@ function writeJsonAtomically(file: string, value: unknown): void {
   finally { rmSync(temp, { force: true }); }
 }
 
-function assertNoForeignRegistryEntry(registry: Registry, id: string, target: string, source: string): void {
+function assertNoForeignRegistryEntry(registry: Registry, id: string, target: string, source: string, adoptedLegacy?: string): void {
   const rows = registry.plugins[id]; if (!Array.isArray(rows)) return;
   for (const row of rows) {
     if (typeof row !== 'object' || row === null || (row as Record<string, unknown>)['scope'] !== 'user') continue;
     const path = (row as Record<string, unknown>)['installPath'];
     if (typeof path !== 'string' || path === target || !existsSync(path)) continue;
+    if (path === adoptedLegacy) continue;
     const ownership = readOwnership(path);
     if (ownership?.pluginId !== id || ownership.source !== source) throw new Error(`claude-code user install ${id} points at ${path}; refusing to replace it`);
   }
+}
+
+/** A legacy native row may be superseded only through explicit adoption. The old cache is never marked or removed. */
+function validateLegacyUserInstall(registry: Registry, id: string, slot: string, plugin: PluginSource): string | undefined {
+  const rows = Array.isArray(registry.plugins[id]) ? registry.plugins[id] : [];
+  const users = rows.filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null && (row as Record<string, unknown>)['scope'] === 'user');
+  if (users.length === 0) return undefined;
+  if (users.length !== 1) throw new Error(`claude-code user install ${id} is ambiguous; refusing adoption`);
+  const row = users[0]!;
+  const path = row['installPath'];
+  if (typeof path !== 'string' || dirname(path) !== slot || !existsSync(path)) throw new Error(`claude-code user install ${id} is outside its native cache slot; refusing adoption`);
+  assertNoSymlinks(path);
+  if (readOwnership(path) !== null) throw new Error(`claude-code user install ${id} is already owned; refusing legacy adoption`);
+  const manifest = parseManifest(join(path, '.claude-plugin', 'plugin.json'), 'existing native');
+  const selected = parseManifest(join(plugin.dir, 'plugin.json'), 'selected canonical');
+  if (manifest.name !== plugin.name || manifest.version === undefined || manifest.version !== selected.version || row['version'] !== manifest.version) {
+    throw new Error(`claude-code user install ${id} native identity does not match the selected plugin; refusing adoption`);
+  }
+  return path;
+}
+
+/** Once a marker-owned adoption is active, updates keep using its registry-selected sibling slot. */
+function ownedRegistryTarget(registry: Registry, id: string, source: string, slot: string, version: string): string | undefined {
+  const rows = Array.isArray(registry.plugins[id]) ? registry.plugins[id] : [];
+  const users = rows.filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null && (row as Record<string, unknown>)['scope'] === 'user');
+  if (users.length !== 1) return undefined;
+  const path = users[0]!['installPath'];
+  if (typeof path !== 'string' || dirname(path) !== slot || path !== join(slot, `${version}.plgnz`) || !existsSync(path)) return undefined;
+  const ownership = readOwnership(path);
+  return ownership?.pluginId === id && ownership.source === source ? path : undefined;
+}
+
+/** A later source SHA gets a new cache slot but retains the native marketplace established before adoption. */
+function hasAdoptedRegistryInstall(registry: Registry, id: string, source: string, slot: string): boolean {
+  const rows = Array.isArray(registry.plugins[id]) ? registry.plugins[id] : [];
+  const users = rows.filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null && (row as Record<string, unknown>)['scope'] === 'user');
+  if (users.length !== 1) return false;
+  const path = users[0]!['installPath'];
+  if (typeof path !== 'string' || dirname(path) !== slot || !existsSync(path)) return false;
+  const ownership = readOwnership(path);
+  return ownership?.pluginId === id && ownership.source === source && ownership.adopted === true;
 }
 
 function assertTargetIsReplaceable(target: string, ownership: Ownership | null, id: string, source: string): void {
@@ -396,7 +445,7 @@ function readOwnership(dir: string): Ownership | null {
     const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
     if (typeof parsed !== 'object' || parsed === null) return null;
     const value = parsed as Record<string, unknown>;
-    return typeof value['source'] === 'string' && typeof value['pluginId'] === 'string' && typeof value['fingerprint'] === 'string' ? { source: value['source'], pluginId: value['pluginId'], fingerprint: value['fingerprint'] } : null;
+    return typeof value['source'] === 'string' && typeof value['pluginId'] === 'string' && typeof value['fingerprint'] === 'string' && (value['adopted'] === undefined || value['adopted'] === true) ? { source: value['source'], pluginId: value['pluginId'], fingerprint: value['fingerprint'], ...(value['adopted'] === true ? { adopted: true } : {}) } : null;
   } catch { return null; }
 }
 
