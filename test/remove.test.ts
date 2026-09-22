@@ -85,8 +85,13 @@ describe('remove', () => {
   test('cursor > removes directory', async () => {
     await withHostEnvAsync('cursor', async (home) => {
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
-      initGitRepo(sourceDir, pluginsMap);
-      await main(['add', sourceDir, '--target', 'cursor']);
+      initGitRepo(sourceDir, {
+        ...pluginsMap,
+        'plugin.json': JSON.stringify({ name: 'demo-plugin', version: '1.0.0', mcpServers: { demo: { command: 'demo' } } }, null, 2),
+      });
+      // The Cursor fixture already has a same-name local plugin. The lifecycle
+      // requires an explicit adoption before this test may remove it as owned.
+      expect(await main(['add', sourceDir, '--target', 'cursor', '--adopt-existing'])).toBe(0);
       
       const code = await main(['remove', 'demo-plugin']);
       expect(code).toBe(0);

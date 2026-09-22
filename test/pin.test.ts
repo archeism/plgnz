@@ -155,6 +155,7 @@ describe('pin · cursor (GUI host)', () => {
       expect(unknown?.message).toContain("plugin 'theirs' has no record in state.json");
       const records = readState(join(home, 'state.json'));
       expect(records.find((r) => r.id === 'ours')?.pins).toEqual(['tool']);
+      expect(records.find((r) => r.id === 'ours')?.installedFingerprint === undefined).toBe(false);
       expect(records.find((r) => r.id === 'theirs')).toBeUndefined();
     });
   });

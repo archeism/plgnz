@@ -14,6 +14,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { runUpdate } from '../src/update';
+import { main } from '../src/cli';
 import { readState } from '../src/state';
 import { kimiWriter } from '../src/hosts/kimi-writer';
 import type { HostWriter } from '../src/host';
@@ -175,6 +176,9 @@ describe('update · re-add from the recorded source', () => {
       materializeInto(home, 'cursor');
       const repo = join(home, 'src-repo');
       const sha = sourceRepo(repo, 'demo-plugin', { 'from-repo': { type: 'stdio', command: '/bin/echo' } });
+      // The materialized Cursor fixture is deliberately unowned. Adopt it
+      // through the public route before asking `update` to re-materialize it.
+      expect(await main(['add', repo, '--target', 'cursor', '--adopt-existing'])).toBe(0);
       writeLedger(home, [
         { host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha },
         { host: 'cursor', id: 'demo-plugin', source: repo, sourceSha: sha },

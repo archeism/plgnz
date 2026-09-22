@@ -1,89 +1,434 @@
-/**
- * claude-code host writer — add/pin/remove for the store documented in
- * docs/hosts/claude-code.md.
- *
- * A sibling of the reader module, not a section of it: a module is evaluated
- * whole, so a writer exported from src/hosts/claude-code.ts would load with
- * the reader and reach doctor through the registry. doctor is read-only by
- * construction (AGENTS.md) — test/doctor-imports.test.ts pins that this
- * module stays out of its import graph.
- */
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+/** Claude Code's native cache/registry writer. Kept separate from the read-only reader. */
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { AddOptions, HostWriter, InstalledPlugin, PinOptions, PinOutcome } from '../host';
 import type { PluginSource, ResolvedSource } from '../source';
 import { claudeCode, mcpCandidates, pluginsDir } from './claude-code';
 import { pinPluginMcpFiles } from '../mcp-write';
 
+const OWNERSHIP = '.plgnz-install.json';
+declare const Bun: { CryptoHasher: new (algorithm: 'sha256') => { update(input: string | Uint8Array): void; digest(encoding: 'hex'): string } };
+type Ownership = { source: string; pluginId: string; fingerprint: string };
+type Registry = { version: number; plugins: Record<string, unknown> };
+
 export const claudeCodeWriter: HostWriter = {
   ...claudeCode,
-  async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void> {
+  supportsAdoption: false,
+  async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void | 'unchanged'> {
     const marketplace = plugin.marketplace || 'local';
     const id = `${plugin.name}@${marketplace}`;
-    const targetDir = join(pluginsDir(), 'cache', marketplace, plugin.name, resolved.sha);
-    const regFile = join(pluginsDir(), 'installed_plugins.json');
-
+    const version = resolved.sha;
+    const slot = join(pluginsDir(), 'cache', marketplace, plugin.name);
+    const target = join(slot, version);
+    const registryFile = join(pluginsDir(), 'installed_plugins.json');
+    const settingsFile = join(pluginsDir(), '..', 'settings.json');
+    const marketplacesFile = join(pluginsDir(), 'known_marketplaces.json');
+    const registry = readRegistry(registryFile);
+    const settings = readSettings(settingsFile);
+    const marketplaces = readMarketplaces(marketplacesFile);
+    assertManagedCache(slot);
+    const existing = readOwnership(target);
+    assertTargetIsReplaceable(target, existing, id, resolved.sourceUri);
+    assertNoForeignRegistryEntry(registry, id, target, resolved.sourceUri);
+    validateMarketplaceRegistration(marketplaces, marketplace, resolved.sourceUri, plugin);
     if (opts?.dryRun) {
-      console.log(`[claude-code] would write directory: ${targetDir}`);
-      console.log(`[claude-code] would update registry: ${regFile}`);
+      const stage = mkdtempSync(join(tmpdir(), 'plgnz-claude-dry-run-'));
+      try { stagePlugin(plugin.dir, stage, plugin.name, version); }
+      finally { rmSync(stage, { recursive: true, force: true }); }
+      console.log(`[claude-code] would activate directory: ${target}`);
+      console.log(`[claude-code] would update registry: ${registryFile}`);
       return;
     }
-
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-      cpSync(plugin.dir, targetDir, { recursive: true });
-    }
-
-    const pluginJson = join(targetDir, '.plugin', 'plugin.json');
-    const rootPluginJson = join(targetDir, 'plugin.json');
-    const sourceManifest = existsSync(pluginJson) ? pluginJson : existsSync(rootPluginJson) ? rootPluginJson : null;
-
-    const targetPluginDir = join(targetDir, '.claude-plugin');
-    const targetPluginJson = join(targetPluginDir, 'plugin.json');
-
-    if (sourceManifest && !existsSync(targetPluginJson)) {
-      mkdirSync(targetPluginDir, { recursive: true });
-      cpSync(sourceManifest, targetPluginJson);
-    }
-
-
-    let reg: any = { version: 2, plugins: {} };
-    if (existsSync(regFile)) {
+    mkdirSync(slot, { recursive: true });
+    assertManagedCache(slot);
+    const stage = mkdtempSync(join(slot, '.plgnz-stage-'));
+    const wrapper = !existsSync(join(resolved.sourceUri, '.claude-plugin', 'marketplace.json')) ? join(pluginsDir(), 'marketplaces', `.plgnz-${marketplace}`) : undefined;
+    const wrapperSnapshot = wrapper === undefined ? undefined : snapshotDirectory(wrapper);
+    let durable = false;
+    try {
+      stagePlugin(plugin.dir, stage, plugin.name, version);
+      const nextMarketplaces = marketplacesWithLocalSource(marketplaces, marketplace, resolved.sourceUri, plugin);
+      writeFileSync(join(stage, OWNERSHIP), JSON.stringify({ source: resolved.sourceUri, pluginId: id, fingerprint: plugin.contentFingerprint ?? '' }));
+      const unchanged = existing !== null && existing.fingerprint === (plugin.contentFingerprint ?? '') && sameTree(stage, target);
+      if (unchanged) {
+        try {
+          writeRegistry(registryFile, registryWithEntry(registry, id, target, version, resolved));
+          writeSettings(settingsFile, settingsWithEnabled(settings, id, true));
+          writeMarketplaces(marketplacesFile, nextMarketplaces);
+          durable = true;
+        } catch (error) {
+          restoreMetadata(registryFile, registry, settingsFile, settings, marketplacesFile, marketplaces);
+          throw error;
+        }
+        return 'unchanged';
+      }
+      let activation: { commit(): void; rollback(): void } | undefined;
       try {
-        reg = JSON.parse(readFileSync(regFile, 'utf8'));
-      } catch {}
+        activation = activate(stage, target, slot);
+        writeRegistry(registryFile, registryWithEntry(registry, id, target, version, resolved));
+        writeSettings(settingsFile, settingsWithEnabled(settings, id, true));
+        writeMarketplaces(marketplacesFile, nextMarketplaces);
+        durable = true;
+      } catch (error) {
+        activation?.rollback();
+        restoreMetadata(registryFile, registry, settingsFile, settings, marketplacesFile, marketplaces);
+        throw error;
+      }
+      // The registry is durable before old cache content is discarded. A cleanup
+      // failure must never roll back the now-active target.
+      activation.commit();
+      cleanupPriorOwnedPaths(registry, id, target, resolved.sourceUri);
+    } catch (error) {
+      // Once metadata points at the new cache, cleanup errors must preserve the
+      // durable activation rather than resurrecting its old wrapper.
+      if (!durable) restoreDirectory(wrapper, wrapperSnapshot);
+      rmSync(stage, { recursive: true, force: true });
+      throw error;
     }
-    if (!reg.plugins) reg.plugins = {};
-    const now = new Date().toISOString();
-
-    let existing = null;
-    if (Array.isArray(reg.plugins[id])) {
-      existing = reg.plugins[id].find((r: any) => r.scope === 'user');
+    finally {
+      rmSync(stage, { recursive: true, force: true });
+      if (wrapperSnapshot !== undefined) rmSync(wrapperSnapshot, { recursive: true, force: true });
     }
-
-    const entry = existing || { scope: 'user', installedAt: now };
-    entry.installPath = targetDir;
-    entry.version = resolved.sha;
-    entry.lastUpdated = now;
-    if (resolved.isGit) entry.gitCommitSha = resolved.sha;
-
-    reg.plugins[id] = [entry];
-    mkdirSync(dirname(regFile), { recursive: true });
-    writeFileSync(regFile, JSON.stringify(reg, null, 2));
   },
   async pin(plugin: InstalledPlugin, opts?: PinOptions): Promise<PinOutcome> {
     if (plugin.path === undefined || !existsSync(plugin.path)) return { changes: [], refusals: [] };
     return pinPluginMcpFiles(plugin.path, mcpCandidates(), opts);
   },
   async remove(id: string): Promise<void> {
-    const regFile = join(pluginsDir(), 'installed_plugins.json');
-    if (!existsSync(regFile)) return;
-    let reg: any;
+    const registryFile = join(pluginsDir(), 'installed_plugins.json');
+    const settingsFile = join(pluginsDir(), '..', 'settings.json');
+    const settings = readSettings(settingsFile);
+    if (!existsSync(registryFile)) {
+      const enabled = settings['enabledPlugins'];
+      if (typeof enabled === 'object' && enabled !== null && !Array.isArray(enabled) && (enabled as Record<string, unknown>)[id] === true) writeSettings(settingsFile, settingsWithEnabled(settings, id, false));
+      return;
+    }
+    const registry = readRegistry(registryFile);
+    const row = registry.plugins[id];
+    if (!Array.isArray(row)) return;
+    const ownedRows = row.filter(record => typeof record === 'object' && record !== null && (record as Record<string, unknown>)['scope'] === 'user');
+    const ownedPaths = ownedRows.flatMap(record => {
+      if (typeof record !== 'object' || record === null) return [];
+      const path = (record as Record<string, unknown>)['installPath'];
+      return typeof path === 'string' && readOwnership(path)?.pluginId === id ? [path] : [];
+    });
+    if (ownedRows.length === 0 || ownedPaths.length !== ownedRows.length) throw new Error(`claude-code user registry entry ${id} is not wholly plgnz-owned; refusing to remove it`);
+    const backups: Array<{ commit(): void; rollback(): void }> = [];
     try {
-      reg = JSON.parse(readFileSync(regFile, 'utf8'));
-    } catch { return; }
-    if (!reg.plugins || !reg.plugins[id]) return;
-    delete reg.plugins[id];
-    writeFileSync(regFile, JSON.stringify(reg, null, 2));
-  }
+      for (const path of ownedPaths) backups.push(moveAside(path));
+      const next: Registry = { ...registry, plugins: { ...registry.plugins } };
+      const retained = row.filter(record => !ownedRows.includes(record));
+      if (retained.length === 0) delete next.plugins[id]; else next.plugins[id] = retained;
+      writeRegistry(registryFile, next);
+      writeSettings(settingsFile, settingsWithEnabled(settings, id, false));
+    } catch (error) {
+      for (const backup of backups.reverse()) backup.rollback();
+      restoreMetadata(registryFile, registry, settingsFile, settings);
+      throw error;
+    }
+    // Do not attempt rollback after any deletion cleanup has begun: the
+    // registry removal is already durable and the active state is correct.
+    for (const backup of backups) backup.commit();
+    const marketplacesFile = join(pluginsDir(), 'known_marketplaces.json');
+    const marketplaces = readMarketplaces(marketplacesFile);
+    const at = id.indexOf('@'); const market = at === -1 ? undefined : id.slice(at + 1);
+    const entry = market ? marketplaces[market] as Record<string, unknown> | undefined : undefined;
+    const path = entry?.['installLocation'];
+    if (typeof path === 'string') {
+      const plugin = id.slice(0, id.indexOf('@'));
+      const copy = join(path, 'plugins', plugin);
+      if (readOwnership(copy)?.pluginId === id) {
+        rmSync(copy, { recursive: true, force: true });
+        const manifest = join(path, '.claude-plugin', 'marketplace.json');
+        if (existsSync(manifest)) {
+          const document: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
+          if (typeof document === 'object' && document !== null && !Array.isArray(document)) {
+            const current = document as Record<string, unknown>;
+            const entries = Array.isArray(current['plugins']) ? current['plugins'] : [];
+            writeFileSync(manifest, JSON.stringify({ ...current, plugins: entries.filter(value => !(typeof value === 'object' && value !== null && (value as Record<string, unknown>)['name'] === plugin)) }, null, 2));
+          }
+        }
+      }
+      if (readOwnership(path)?.pluginId === `marketplace@${market}` && readdirSync(join(path, 'plugins')).length === 0) { rmSync(path, { recursive: true, force: true }); const next = { ...marketplaces }; delete next[market as string]; writeMarketplaces(marketplacesFile, next); }
+    }
+  },
 };
+
+function stagePlugin(source: string, stage: string, fallbackName: string, fallbackVersion: string): void {
+  cpSync(source, stage, { recursive: true });
+  assertNoSymlinks(stage);
+  const root = join(stage, 'plugin.json');
+  const canonical = join(stage, '.plugin', 'plugin.json');
+  const manifest = existsSync(canonical) ? canonical : existsSync(root) ? root : undefined;
+  if (manifest === undefined) throw new Error('Claude Code stage has no Agent Plugins manifest');
+  const canonicalManifest = parseManifest(manifest, 'canonical');
+  if (canonicalManifest.name !== fallbackName) throw new Error(`Claude Code canonical manifest name ${canonicalManifest.name} does not match selected plugin ${fallbackName}`);
+  const native = join(stage, '.claude-plugin', 'plugin.json');
+  if (!existsSync(native)) {
+    mkdirSync(dirname(native), { recursive: true });
+    writeFileSync(native, JSON.stringify({ name: canonicalManifest.name, version: canonicalManifest.version ?? fallbackVersion, description: canonicalManifest.description, skills: './skills/' }));
+  }
+  projectNativeCommands(stage, native);
+  const nativeManifest = parseManifest(native, 'Claude Code');
+  if (nativeManifest.name !== canonicalManifest.name || (canonicalManifest.version !== undefined && nativeManifest.version !== canonicalManifest.version)) throw new Error('Claude Code native manifest identity does not match the canonical manifest');
+  for (const path of [join(stage, 'skills'), join(stage, 'commands'), join(stage, '.claude', 'commands')]) {
+    if (existsSync(path) && !statSync(path).isDirectory()) throw new Error(`Claude Code stage native content path is not a directory: ${path}`);
+  }
+  if (fallbackName.length === 0) throw new Error('Claude Code plugin name is empty');
+}
+
+/** Claude Code only discovers plugin commands from an explicit manifest list. */
+function projectNativeCommands(stage: string, native: string): void {
+  const commandsRoot = join(stage, '.claude', 'commands');
+  if (!existsSync(commandsRoot)) return;
+  const commands = readdirSync(commandsRoot).filter(file => file.endsWith('.md')).sort().map(file => `./.claude/commands/${file}`);
+  if (commands.length === 0) return;
+  const parsed: unknown = JSON.parse(readFileSync(native, 'utf8'));
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('Invalid Claude Code manifest');
+  const manifest = parsed as Record<string, unknown>;
+  if (manifest['commands'] !== undefined) {
+    const listed = manifest['commands'];
+    if (!Array.isArray(listed) || !commands.every(command => listed.includes(command))) throw new Error('Claude Code manifest does not enumerate every native Markdown command');
+    return;
+  }
+  manifest['commands'] = commands;
+  writeFileSync(native, JSON.stringify(manifest, null, 2));
+}
+
+function parseManifest(file: string, kind: string): { name: string; version?: string; description?: string } {
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (error) { throw new Error(`Invalid ${kind} manifest: ${error instanceof Error ? error.message : String(error)}`); }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`Invalid ${kind} manifest`);
+  const manifest = value as Record<string, unknown>;
+  if (typeof manifest['name'] !== 'string' || manifest['name'] === '') throw new Error(`Invalid ${kind} manifest identity`);
+  if (manifest['version'] !== undefined && (typeof manifest['version'] !== 'string' || manifest['version'] === '')) throw new Error(`Invalid ${kind} manifest identity`);
+  return { name: manifest['name'], ...(typeof manifest['version'] === 'string' ? { version: manifest['version'] } : {}), ...(typeof manifest['description'] === 'string' ? { description: manifest['description'] } : {}) };
+}
+
+function readRegistry(file: string): Registry {
+  if (!existsSync(file)) return { version: 2, plugins: {} };
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (error) { throw new Error(`Invalid Claude Code plugin registry: ${file} (${error instanceof Error ? error.message : String(error)})`); }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`Invalid Claude Code plugin registry: ${file}`);
+  const root = value as Record<string, unknown>;
+  if (typeof root['plugins'] !== 'object' || root['plugins'] === null || Array.isArray(root['plugins'])) throw new Error(`Invalid Claude Code plugin registry: ${file}`);
+  return { version: typeof root['version'] === 'number' ? root['version'] : 2, plugins: root['plugins'] as Record<string, unknown> };
+}
+
+function readSettings(file: string): Record<string, unknown> {
+  if (!existsSync(file)) return {};
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (error) { throw new Error(`Invalid Claude Code settings: ${file} (${error instanceof Error ? error.message : String(error)})`); }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`Invalid Claude Code settings: ${file}`);
+  const settings = value as Record<string, unknown>;
+  if (settings['enabledPlugins'] !== undefined && (typeof settings['enabledPlugins'] !== 'object' || settings['enabledPlugins'] === null || Array.isArray(settings['enabledPlugins']))) throw new Error(`Invalid Claude Code enabledPlugins setting: ${file}`);
+  return settings;
+}
+
+function readMarketplaces(file: string): Record<string, unknown> {
+  if (!existsSync(file)) return {};
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (error) { throw new Error(`Invalid Claude Code marketplace registry: ${file} (${error instanceof Error ? error.message : String(error)})`); }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`Invalid Claude Code marketplace registry: ${file}`);
+  return value as Record<string, unknown>;
+}
+
+function marketplacesWithLocalSource(marketplaces: Record<string, unknown>, name: string, source: string, plugin: PluginSource): Record<string, unknown> {
+  const manifest = join(source, '.claude-plugin', 'marketplace.json');
+  const catalog = validateMarketplaceRegistration(marketplaces, name, source, plugin);
+  if (!existsSync(manifest)) {
+    const marker = join(catalog, OWNERSHIP);
+    const copy = join(catalog, 'plugins', plugin.name);
+    rmSync(copy, { recursive: true, force: true });
+    cpSync(plugin.dir, copy, { recursive: true });
+    writeFileSync(join(copy, OWNERSHIP), JSON.stringify({ source, pluginId: `${plugin.name}@${name}`, fingerprint: plugin.contentFingerprint ?? '' }));
+    mkdirSync(join(catalog, '.claude-plugin'), { recursive: true });
+    const current = existsSync(join(catalog, '.claude-plugin', 'marketplace.json')) ? JSON.parse(readFileSync(join(catalog, '.claude-plugin', 'marketplace.json'), 'utf8')) as { plugins?: unknown[] } : {};
+    const plugins = Array.isArray(current.plugins) ? current.plugins.filter(entry => !(typeof entry === 'object' && entry !== null && (entry as Record<string, unknown>)['name'] === plugin.name)) : [];
+    plugins.push({ name: plugin.name, source: `./plugins/${plugin.name}` });
+    writeFileSync(join(catalog, '.claude-plugin', 'marketplace.json'), JSON.stringify({ name, owner: { name: 'plgnz' }, plugins }));
+    writeFileSync(marker, JSON.stringify({ source: 'plgnz-wrapper', pluginId: `marketplace@${name}`, fingerprint: '' }));
+  }
+  let document: unknown;
+  try { document = JSON.parse(readFileSync(join(catalog, '.claude-plugin', 'marketplace.json'), 'utf8')); }
+  catch (error) { throw new Error(`Invalid Claude Code marketplace manifest: ${error instanceof Error ? error.message : String(error)}`); }
+  if (typeof document !== 'object' || document === null || (document as Record<string, unknown>)['name'] !== name) throw new Error(`Claude Code marketplace manifest identity does not match ${name}`);
+  return { ...marketplaces, [name]: { source: { source: 'directory', path: catalog }, installLocation: catalog, lastUpdated: new Date().toISOString() } };
+}
+
+/** Read-only preflight shared by real activation and dry-run. */
+function validateMarketplaceRegistration(marketplaces: Record<string, unknown>, name: string, source: string, plugin: PluginSource): string {
+  if (!source.startsWith('/')) throw new Error(`Claude Code marketplace registration for remote source ${name} is unverified`);
+  const manifest = join(source, '.claude-plugin', 'marketplace.json');
+  const catalog = existsSync(manifest) ? source : join(pluginsDir(), 'marketplaces', `.plgnz-${name}`);
+  if (!existsSync(manifest) && existsSync(catalog)) {
+    assertNoSymlinks(catalog);
+    const wrapper = readOwnership(catalog);
+    if (wrapper?.pluginId !== `marketplace@${name}` || wrapper.source !== 'plgnz-wrapper') throw new Error(`Claude Code marketplace wrapper ${catalog} is foreign; refusing to replace it`);
+    const copy = join(catalog, 'plugins', plugin.name);
+    if (existsSync(copy) && readOwnership(copy)?.source !== source) throw new Error(`Claude Code marketplace wrapper plugin ${copy} is foreign; refusing to replace it`);
+  }
+  if (existsSync(join(catalog, '.claude-plugin', 'marketplace.json'))) {
+    let document: unknown;
+    try { document = JSON.parse(readFileSync(join(catalog, '.claude-plugin', 'marketplace.json'), 'utf8')); }
+    catch (error) { throw new Error(`Invalid Claude Code marketplace manifest: ${error instanceof Error ? error.message : String(error)}`); }
+    if (typeof document !== 'object' || document === null || (document as Record<string, unknown>)['name'] !== name) throw new Error(`Claude Code marketplace manifest identity does not match ${name}`);
+  }
+  const existing = marketplaces[name];
+  if (typeof existing === 'object' && existing !== null) {
+    const previous = ((existing as Record<string, unknown>)['source'] as Record<string, unknown> | undefined)?.['path'];
+    if (typeof previous === 'string' && previous !== catalog) throw new Error(`Claude Code marketplace ${name} is registered from a different source; refusing to replace it`);
+  }
+  return catalog;
+}
+
+/** Restore durable metadata without letting a restoration failure strand a cache swap. */
+function restoreMetadata(registryFile: string, registry: Registry, settingsFile: string, settings: Record<string, unknown>, marketplacesFile?: string, marketplaces?: Record<string, unknown>): void {
+  try { writeRegistry(registryFile, registry); } catch { /* the failed atomic write left this file untouched */ }
+  try { writeSettings(settingsFile, settings); } catch { /* preserve the original operation error */ }
+  if (marketplacesFile !== undefined && marketplaces !== undefined) {
+    try { writeMarketplaces(marketplacesFile, marketplaces); } catch { /* preserve the original operation error */ }
+  }
+}
+
+/** Snapshot an owned wrapper so wrapper, cache, and registries share one rollback boundary. */
+function snapshotDirectory(directory: string): string | undefined {
+  if (!existsSync(directory)) return undefined;
+  assertNoSymlinks(directory);
+  const snapshot = mkdtempSync(join(tmpdir(), 'plgnz-claude-wrapper-'));
+  cpSync(directory, join(snapshot, 'previous'), { recursive: true });
+  return snapshot;
+}
+
+function restoreDirectory(directory: string | undefined, snapshot: string | undefined): void {
+  if (directory === undefined) return;
+  rmSync(directory, { recursive: true, force: true });
+  const previous = snapshot === undefined ? undefined : join(snapshot, 'previous');
+  if (previous !== undefined && existsSync(previous)) {
+    mkdirSync(dirname(directory), { recursive: true });
+    renameSync(previous, directory);
+  }
+}
+
+function settingsWithEnabled(settings: Record<string, unknown>, id: string, enabled: boolean): Record<string, unknown> {
+  const prior = settings['enabledPlugins'];
+  const plugins = typeof prior === 'object' && prior !== null && !Array.isArray(prior) ? prior as Record<string, unknown> : {};
+  return { ...settings, enabledPlugins: { ...plugins, [id]: enabled } };
+}
+
+function registryWithEntry(registry: Registry, id: string, installPath: string, version: string, resolved: ResolvedSource): Registry {
+  const now = new Date().toISOString();
+  const prior = Array.isArray(registry.plugins[id]) ? registry.plugins[id] : [];
+  const user = prior.find(value => typeof value === 'object' && value !== null && (value as Record<string, unknown>)['scope'] === 'user');
+  const entry: Record<string, unknown> = typeof user === 'object' && user !== null ? { ...(user as Record<string, unknown>) } : { scope: 'user', installedAt: now };
+  entry['installPath'] = installPath; entry['version'] = version; entry['lastUpdated'] = now;
+  if (resolved.isGit) entry['gitCommitSha'] = resolved.sha; else delete entry['gitCommitSha'];
+  let replaced = false;
+  const rows = prior.map(value => {
+    if (!replaced && typeof value === 'object' && value !== null && (value as Record<string, unknown>)['scope'] === 'user') { replaced = true; return entry; }
+    return value;
+  });
+  if (!replaced) rows.push(entry);
+  return { ...registry, plugins: { ...registry.plugins, [id]: rows } };
+}
+
+function writeRegistry(file: string, registry: Registry): void {
+  writeJsonAtomically(file, registry);
+}
+
+function writeSettings(file: string, settings: Record<string, unknown>): void {
+  writeJsonAtomically(file, settings);
+}
+
+function writeMarketplaces(file: string, marketplaces: Record<string, unknown>): void {
+  writeJsonAtomically(file, marketplaces);
+}
+
+function writeJsonAtomically(file: string, value: unknown): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const temp = `${file}.plgnz-${Date.now()}`;
+  try { writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`); renameSync(temp, file); }
+  finally { rmSync(temp, { force: true }); }
+}
+
+function assertNoForeignRegistryEntry(registry: Registry, id: string, target: string, source: string): void {
+  const rows = registry.plugins[id]; if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null || (row as Record<string, unknown>)['scope'] !== 'user') continue;
+    const path = (row as Record<string, unknown>)['installPath'];
+    if (typeof path !== 'string' || path === target || !existsSync(path)) continue;
+    const ownership = readOwnership(path);
+    if (ownership?.pluginId !== id || ownership.source !== source) throw new Error(`claude-code user install ${id} points at ${path}; refusing to replace it`);
+  }
+}
+
+function assertTargetIsReplaceable(target: string, ownership: Ownership | null, id: string, source: string): void {
+  if (existsSync(target) && ownership === null) throw new Error(`claude-code cache slot ${target} is unowned; refusing to replace it`);
+  if (ownership !== null && (ownership.pluginId !== id || ownership.source !== source)) throw new Error(`claude-code cache slot ${target} has a different owned source identity; refusing to replace it`);
+}
+
+function assertManagedCache(slot: string): void {
+  const root = pluginsDir();
+  if (existsSync(root)) assertNoSymlinks(root);
+  if (existsSync(slot)) assertNoSymlinks(slot);
+}
+
+function cleanupPriorOwnedPaths(registry: Registry, id: string, active: string, source: string): void {
+  const rows = registry.plugins[id];
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null) continue;
+    const path = (row as Record<string, unknown>)['installPath'];
+    if (typeof path !== 'string' || path === active || !existsSync(path)) continue;
+    const ownership = readOwnership(path);
+    if (ownership?.pluginId === id && ownership.source === source) rmSync(path, { recursive: true, force: true });
+  }
+}
+
+function readOwnership(dir: string): Ownership | null {
+  const file = join(dir, OWNERSHIP); if (!existsSync(file)) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const value = parsed as Record<string, unknown>;
+    return typeof value['source'] === 'string' && typeof value['pluginId'] === 'string' && typeof value['fingerprint'] === 'string' ? { source: value['source'], pluginId: value['pluginId'], fingerprint: value['fingerprint'] } : null;
+  } catch { return null; }
+}
+
+function activate(stage: string, target: string, slot: string): { commit(): void; rollback(): void } {
+  if (!existsSync(target)) { renameSync(stage, target); return { commit: () => {}, rollback: () => rmSync(target, { recursive: true, force: true }) }; }
+  const backup = moveAside(target, slot);
+  try { renameSync(stage, target); } catch (error) { backup.rollback(); throw error; }
+  return { commit: backup.commit, rollback: () => { rmSync(target, { recursive: true, force: true }); backup.rollback(); } };
+}
+
+function moveAside(path: string, parent = dirname(path)): { commit(): void; rollback(): void } {
+  const backupRoot = mkdtempSync(join(parent, '.plgnz-backup-')); const backup = join(backupRoot, 'previous'); renameSync(path, backup);
+  return { commit: () => rmSync(backupRoot, { recursive: true, force: true }), rollback: () => { if (existsSync(backup)) renameSync(backup, path); rmSync(backupRoot, { recursive: true, force: true }); } };
+}
+
+function sameTree(left: string, right: string): boolean {
+  if (!existsSync(right)) return false;
+  const listing = (root: string): string[] => {
+    const out: string[] = []; const visit = (dir: string, prefix: string): void => {
+      for (const entry of readdirSync(dir).sort()) { if (entry === OWNERSHIP) continue; const path = join(dir, entry); const relative = prefix === '' ? entry : `${prefix}/${entry}`; if (statSync(path).isDirectory()) visit(path, relative); else if (statSync(path).isFile()) out.push(`${relative}:${bytesKey(path)}`); }
+    }; visit(root, ''); return out;
+  };
+  return JSON.stringify(listing(left)) === JSON.stringify(listing(right));
+}
+
+function bytesKey(path: string): string {
+  const readBytes = readFileSync as unknown as (file: string) => Uint8Array;
+  const hash = new Bun.CryptoHasher('sha256');
+  hash.update(readBytes(path));
+  return hash.digest('hex');
+}
+
+function assertNoSymlinks(dir: string): void {
+  for (const entry of readdirSync(dir)) { const path = join(dir, entry); const stat = lstatSync(path); if (stat.isSymbolicLink()) throw new Error(`Claude Code cache contains symlink: ${path}`); if (stat.isDirectory()) assertNoSymlinks(path); }
+}

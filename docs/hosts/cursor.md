@@ -59,3 +59,32 @@ is a user-level file and is never touched. Rationale and refusal rules:
 - No per-plugin registry file observed under `plugins/local/` (unlike
   claude-code); installs are discovered by scanning for
   `.cursor-plugin/plugin.json`. If Cursor grows an index, prefer it.
+
+## plgnz lifecycle and compatibility
+
+`src/hosts/cursor-writer.ts` stages a dereferenced copy beside the native local
+store, validates its native manifest, writes a source/id/fingerprint ownership
+marker, pins only staged plugin MCP files, then swaps it into
+`plugins/local/<name>`. A matching staged tree returns `unchanged`; a changed
+local source fingerprint refreshes the same native directory. Existing local
+directories without a matching marker are refused unless `--adopt-existing`
+is explicit and their native identity matches. Removal deletes only a
+marker-owned directory. User `~/.cursor/mcp.json` is never changed.
+
+The current evidence proves plugin `skills/<name>/SKILL.md`, including the
+top-level `disable-model-invocation: true` gate, so the writer copies those
+bytes without a conversion. Cursor's command-directory grammar, arguments and
+resource semantics are still unverified for the local plugin loader. A plugin
+containing `commands/` or `.claude/commands/` therefore fails before activation
+instead of borrowing Codex's command-to-skill transform or silently stripping
+its invocation policy. The focused lifecycle test uses an isolated Cursor root
+and verifies the native-store reader's discovery shape, exact gated-skill
+bytes, unchanged re-add, same-version refresh, failed conversion retention,
+and owned cleanup. A real Cursor CLI transcript remains a separate runtime
+check. Cursor Agent CLI `2026.09.18-9a7762b` has separate
+`CURSOR_CONFIG_DIR` and `CURSOR_DATA_DIR` roots; both can point at an isolated
+Cursor directory while its normal authentication remains available, so a probe
+need not install into the real store. The attempted isolated `--mode ask`
+loader probe was rejected for exhausted usage before it could produce a
+transcript. It therefore establishes the isolation seam, not runtime skill
+loading.
