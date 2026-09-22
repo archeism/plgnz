@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "addy",
+  "version": "0.1.0",
+  "description": "Addy Osmani agent-skills: production-grade engineering workflows from spec through ship.",
+  "author": { "name": "Charles" },
+  "homepage": "https://github.com/addyosmani/agent-skills",
+  "repository": "https://github.com/addyosmani/agent-skills",
+  "license": "MIT"
+}
