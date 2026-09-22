@@ -2,7 +2,7 @@ import { test, expect, describe } from 'bun:test';
 import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { withHostEnvAsync, initGitRepo } from './util';
+import { withHostEnvAsync, initGitRepo, writeLedger } from './util';
 import { main } from '../src/cli';
 import { claudeCode } from '../src/hosts/claude-code';
 import { codex } from '../src/hosts/codex';
@@ -17,6 +17,26 @@ const pluginsMap = {
 };
 
 describe('remove', () => {
+  test('--target removes only that host record', async () => {
+    await withHostEnvAsync('codex', async (home) => {
+      writeLedger(home, [
+        { host: 'codex', id: 'demo-plugin@local', source: '/codex-source', sourceSha: 'one' },
+        { host: 'cursor', id: 'demo-plugin@local', source: '/cursor-source', sourceSha: 'two' },
+      ]);
+      expect(await main(['remove', 'demo-plugin@local', '--target', 'codex'])).toBe(0);
+      expect(readState().find((record) => record.host === 'codex')).toBeUndefined();
+      expect(readState().find((record) => record.host === 'cursor')?.source).toBe('/cursor-source');
+    });
+  });
+
+  test('refuses an unrecorded native install', async () => {
+    await withHostEnvAsync('codex', async () => {
+      expect(codex.listInstalled().some((plugin) => plugin.id === 'demo-plugin@demo-market')).toBe(true);
+      expect(await main(['remove', 'demo-plugin@demo-market', '--target', 'codex'])).toBe(1);
+      expect(codex.listInstalled().some((plugin) => plugin.id === 'demo-plugin@demo-market')).toBe(true);
+    });
+  });
+
   test('claude-code > removes plugin from registry', async () => {
     await withHostEnvAsync('claude-code', async (home) => {
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));

@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runDoctor, type DoctorFinding } from '../src/doctor';
@@ -17,6 +17,7 @@ import { cursor } from '../src/hosts/cursor';
 import { omp } from '../src/hosts/omp';
 import type { HostReader } from '../src/host';
 import { commitAll, initGitRepo, materialize, repoRoot, withHostEnv, writeLedger } from './util';
+import { fingerprintTree } from '../src/fingerprint';
 
 function marks(result: { findings: DoctorFinding[] }): string {
   return result.findings.map((f) => f.mark).join('');
@@ -309,6 +310,44 @@ describe('doctor · CLI', () => {
 });
 
 describe('doctor · output shape', () => {
+  test('content proof detects source drift, refresh, installed tampering, and deletion', () => {
+    const source = mkdtempSync(join(tmpdir(), 'plgnz-doctor-source-'));
+    const installed = mkdtempSync(join(tmpdir(), 'plgnz-doctor-installed-'));
+    const writeBytes = writeFileSync as unknown as (path: string, bytes: Uint8Array) => void;
+    writeBytes(join(source, 'value.bin'), new Uint8Array([0, 1, 255]));
+    writeBytes(join(installed, 'value.bin'), new Uint8Array([4, 5, 6]));
+    const host: HostReader = {
+      id: 'proof-host', gui: false, detect: () => true, stores: () => [], mcpEntries: () => [],
+      listInstalled: () => [{ id: 'proof', name: 'proof', enabled: true, path: installed }],
+    };
+    const record = { host: host.id, id: 'proof', source: source, sourceSha: 'local', sourceDir: source,
+      fingerprint: fingerprintTree(source), installedFingerprint: fingerprintTree(installed), ownership: 'plgnz' };
+    const content = (): DoctorFinding => runDoctor([host], [record]).findings.find((finding) => finding.check === 'content')!;
+
+    expect(content().mark).toBe('✓');
+    expect(content().pluginId).toBe('proof');
+    writeBytes(join(source, 'value.bin'), new Uint8Array([9]));
+    expect(content().mark).toBe('✗');
+    record.fingerprint = fingerprintTree(source);
+    expect(content().mark).toBe('✓');
+    writeBytes(join(installed, 'value.bin'), new Uint8Array([8]));
+    expect(content().mark).toBe('✗');
+    rmSync(installed, { recursive: true, force: true });
+    expect(content().mark).toBe('✗');
+  });
+
+  test('surfaces a durable pending intent as an actionable warning', () => {
+    const result = runDoctor([cursor], [{
+      host: 'cursor',
+      id: 'pending-plugin',
+      source: '/source',
+      sourceSha: 'old',
+      ownership: 'plgnz',
+      pending: 'remove',
+    }]);
+    expect(result.findings.some((finding) => finding.mark === '!' && finding.message.includes('pending remove'))).toBe(true);
+  });
+
   test('marks are only ✓ ✗ !', () => {
     withHostEnv('cursor', () => {
       const result = runDoctor([cursor]);

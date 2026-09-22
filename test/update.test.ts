@@ -11,10 +11,14 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { runUpdate } from '../src/update';
 import { readState } from '../src/state';
-import { commitAll, fakeBin, initGitRepo, materializeInto, withHostEnvAsync, withPathPrefix, writeFiles, writeLedger } from './util';
+import { kimiWriter } from '../src/hosts/kimi-writer';
+import type { HostWriter } from '../src/host';
+import type { InstallRecord } from '../src/state';
+import { commitAll, fakeBin, initGitRepo, materialize, materializeInto, repoRoot, withHostEnvAsync, withPathPrefix, writeFiles, writeLedger } from './util';
 
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json';
 
@@ -35,6 +39,112 @@ function kimiManaged(home: string, plugin = 'demo-plugin'): string {
 }
 
 describe('update · re-add from the recorded source', () => {
+  test('selected writers leave records for other hosts untouched', async () => {
+    await withHostEnvAsync('kimi', async (home) => {
+      const repo = join(home, 'src-repo');
+      const sha = sourceRepo(repo, 'demo-plugin', { tool: { type: 'stdio', command: '/bin/echo' } });
+      writeLedger(home, [
+        { host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha },
+        { host: 'cursor', id: 'demo-plugin', source: repo, sourceSha: sha },
+      ]);
+      const result = await runUpdate(undefined, { writers: [kimiWriter] });
+      expect(result.exitCode).toBe(0);
+      expect(result.findings.some((finding) => finding.host === 'cursor')).toBe(false);
+      expect(readState().find((record) => record.host === 'cursor')?.sourceSha).toBe(sha);
+    });
+  });
+
+  test('finalizes each successful target and leaves a durable pending intent for a later failure', async () => {
+    await withHostEnvAsync('kimi', async (home) => {
+      const repo = join(home, 'src-repo');
+      const sha = initGitRepo(repo, {
+        'good/plugin.json': JSON.stringify({ name: 'good' }),
+        'bad/plugin.json': JSON.stringify({ name: 'bad' }),
+      });
+      writeLedger(home, [
+        { host: 'good-host', id: 'good', source: repo, sourceSha: sha },
+        { host: 'bad-host', id: 'bad', source: repo, sourceSha: sha },
+      ]);
+      const base = {
+        gui: false,
+        detect: () => true,
+        stores: () => [],
+        listInstalled: () => [],
+        mcpEntries: () => [],
+        remove: async () => {},
+        pin: async () => ({ changes: [], refusals: [] }),
+      };
+      const good = { ...base, id: 'good-host', listInstalled: () => [{ id: 'good', name: 'good', enabled: true, path: join(repo, 'good') }], add: async () => {} } as HostWriter;
+      const bad = { ...base, id: 'bad-host', add: async () => { throw new Error('later target failed'); } } as HostWriter;
+
+      const result = await runUpdate(undefined, { writers: [good, bad] });
+      expect(result.exitCode).toBe(1);
+      const state = readState();
+      expect(state.find((record) => record.host === 'good-host')?.pending).toBeUndefined();
+      expect(state.find((record) => record.host === 'bad-host')?.pending).toBe('install');
+    });
+  });
+
+  test('does not flush a failed finalization as complete while finalizing a later record', async () => {
+    await withHostEnvAsync('kimi', async (home) => {
+      const repo = join(home, 'src-repo');
+      const sha = initGitRepo(repo, {
+        'first/plugin.json': JSON.stringify({ name: 'first' }),
+        'second/plugin.json': JSON.stringify({ name: 'second' }),
+      });
+      const initial: InstallRecord[] = [
+        { host: 'first-host', id: 'first', source: repo, sourceSha: sha },
+        { host: 'second-host', id: 'second', source: repo, sourceSha: sha },
+      ];
+      const copy = (records: InstallRecord[]): InstallRecord[] => JSON.parse(JSON.stringify(records)) as InstallRecord[];
+      let durable = copy(initial);
+      let writes = 0;
+      const writer = (id: string): HostWriter => ({
+        id, gui: false, detect: () => true, stores: () => [], listInstalled: () => [{ id: id.replace('-host', ''), name: id.replace('-host', ''), enabled: true, path: join(repo, id.replace('-host', '')) }], mcpEntries: () => [],
+        add: async () => {}, remove: async () => {}, pin: async () => ({ changes: [], refusals: [] }),
+      });
+      const result = await runUpdate(undefined, {
+        state: copy(initial),
+        writers: [writer('first-host'), writer('second-host')],
+        writeState: (records) => {
+          writes += 1;
+          if (writes === 2) throw new Error('forced first finalization write failure');
+          durable = copy(records);
+        },
+      });
+      expect(result.exitCode).toBe(1);
+      expect(durable.find((record) => record.host === 'first-host')?.pending).toBe('install');
+      expect(durable.find((record) => record.host === 'second-host')?.pending).toBeUndefined();
+    });
+  });
+
+  test('actual CLI emits clean JSON for update dry-run', () => {
+    const { home, env } = materialize('kimi');
+    const repo = join(home, 'src-repo');
+    const sha = sourceRepo(repo, 'demo-plugin', { tool: { type: 'stdio', command: '/bin/echo' } });
+    writeLedger(home, [{ host: 'kimi', id: 'demo-plugin', source: repo, sourceSha: sha }]);
+    const result = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'update', '--target', 'kimi', '--dry-run', '--json'], {
+      cwd: repoRoot,
+      env: { ...process.env, ...env },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    expect(Array.isArray(JSON.parse(result.stdout))).toBe(true);
+  });
+
+  test('actual CLI reports corrupt state as a failed JSON update outcome', () => {
+    const { home, env } = materialize('kimi');
+    writeFileSync(join(home, 'state.json'), '{not json');
+    const result = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), 'update', '--target', 'kimi', '--json'], {
+      cwd: repoRoot, env: { ...process.env, ...env }, encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    const outcomes = JSON.parse(result.stdout) as Array<{ status: string; action?: string; diagnostic?: string }>;
+    expect(outcomes[0]?.status).toBe('failed');
+    expect(outcomes[0]?.action).toBe('update');
+    expect(outcomes[0]?.diagnostic).toContain('Invalid state.json');
+  });
+
   test('kimi: re-materializes the copy and advances the recorded sha', async () => {
     await withHostEnvAsync('kimi', async (home) => {
       const repo = join(home, 'src-repo');
@@ -53,7 +163,10 @@ describe('update · re-add from the recorded source', () => {
       expect(readFileSync(join(managed, 'mcp.json'), 'utf8')).toContain('from-repo-v2');
       // a copy-based store is replaced, not merged into
       expect(existsSync(join(managed, 'stale.txt'))).toBe(false);
-      expect(readState(join(home, 'state.json')).find((r) => r.host === 'kimi')?.sourceSha).toBe(sha2);
+      const record = readState(join(home, 'state.json')).find((r) => r.host === 'kimi');
+      expect(record?.sourceSha).toBe(sha2);
+      expect(record?.sourceDir?.endsWith('/src-repo/demo-plugin')).toBe(true);
+      expect(record?.installedFingerprint === undefined).toBe(false);
     });
   });
 

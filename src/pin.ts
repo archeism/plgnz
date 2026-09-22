@@ -30,6 +30,7 @@ import type { Mark } from './doctor';
 import { writers as allWriters } from './hosts/writers';
 import { findRecord, readState, type InstallRecord } from './state';
 import { writeState } from './state-write';
+import { fingerprintTree } from './fingerprint';
 
 export interface PinFinding {
   host: string;
@@ -109,6 +110,12 @@ export async function runPin(options: PinRunOptions = {}): Promise<PinRunResult>
       if (next.length !== (record.pins ?? []).length) {
         record.pins = next;
         ledgerChanged = true;
+      }
+      try {
+        record.installedFingerprint = fingerprintTree(plugin.path);
+        ledgerChanged = true;
+      } catch (error) {
+        findings.push({ host: host.id, mark: '✗', message: `plugin '${plugin.id}' was pinned but its installed bytes could not be recorded — ${(error as Error).message}` });
       }
     }
   }

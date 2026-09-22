@@ -1,0 +1,33 @@
+{
+  "date": "2026-09-22",
+  "surface": "Codex CLI app-server skills/list and exec; isolated CODEX_HOME",
+  "cli_version": "0.153.4",
+  "model": "gpt-5.6-terra",
+  "reasoning_effort": "low",
+  "native_skill_count": 34,
+  "native_load_errors": [],
+  "automatic_command_catalog": [],
+  "ordinary_skill_present": true,
+  "explicit_skill_body_injected": true,
+  "final_answer": "Selected mode: autonomous (`auto`).\n\nPlan path: `tasks/plan.md`.\n\nReferenced skills: `../incremental-implementation/SKILL.md` and `../test-driven-development/SKILL.md`.\n\nSibling personas: `../../agents/<persona>.md`.",
+  "usage": {
+    "input_tokens": 19040,
+    "cached_input_tokens": 11008,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 123,
+    "reasoning_output_tokens": 64,
+    "total_tokens": 19163
+  },
+  "transcript_elapsed_seconds": 9.383,
+  "rollout_id": "01a0c96e-d92b-7fb0-b214-ded76d4b9814",
+  "scope": "Codex discovery and explicit instruction loading, not autonomous execution of the build skill or another harness",
+  "skill_decision": "Operating skills unchanged; independent review and native transcript checks caught and corrected implementation defects. No skill-improvement or cost-reduction claim.",
+  "resources": "Peak memory and CPU not measured",
+  "evidence_local": "/tmp/plgnz-native-proof",
+  "build_skill_sha256": "958253c9b451d8bfb84319526ae25ae66cbca2a1f88296c5551c294c0d5d6ec9",
+  "conversion_source_sha256": "8b736053043b35b20b8e120bad6feaee8d26aa07fe9498d55697b2d078d39bf1",
+  "operating_skill_sha256": {
+    "agent-orchestration": "ef299e02fcc98ee34edab93d0bbf752c9ae142dd6f44c792b5d52788c94dfefc",
+    "rsi-loop": "138123efea0acd845618ac8714c506136870642d4fcaab648341cdc170e2463f"
+  }
+}

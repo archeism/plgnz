@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
 import { normalizeSource, resolveSource } from '../src/source';
+import { fingerprintTree } from '../src/fingerprint';
 
 function plugin(dir: string, name = 'fixture'): void {
   mkdirSync(dir, { recursive: true });
@@ -103,6 +104,17 @@ describe('resolveSource', () => {
     writeBytes(join(first, 'resource.bin'), [0x80]);
     writeBytes(join(second, 'resource.bin'), [0x81]);
     expect(resolveSource(first).plugins[0]?.contentFingerprint === resolveSource(second).plugins[0]?.contentFingerprint).toBe(false);
+  });
+
+  test('fingerprint framing cannot confuse file bytes with the next file record', () => {
+    const first = mkdtempSync(join(tmpdir(), 'plgnz-framing-one-'));
+    const second = mkdtempSync(join(tmpdir(), 'plgnz-framing-two-'));
+    mkdirSync(first, { recursive: true });
+    mkdirSync(second, { recursive: true });
+    writeBytes(join(first, 'a'), [88, 0, 102, 0, 98, 0, 89]);
+    writeFileSync(join(second, 'a'), 'X');
+    writeFileSync(join(second, 'b'), 'Y');
+    expect(fingerprintTree(first) === fingerprintTree(second)).toBe(false);
   });
 });
 

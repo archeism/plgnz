@@ -57,7 +57,7 @@ function table(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-/** Pick the install dir for `name@marketplace`: the highest version subdir of its cache slot. */
+/** Pick the install dir using Codex's `active_plugin_version`: `local` wins, then semver, then lexical fallback. */
 function cacheDirFor(marketplace: string, name: string): string | undefined {
   const slot = join(codexHome(), 'plugins', 'cache', marketplace, name);
   if (!existsSync(slot)) return undefined;
@@ -69,9 +69,44 @@ function cacheDirFor(marketplace: string, name: string): string | undefined {
     } catch {
       continue;
     }
-    if (best === undefined || entry > best) best = entry;
+    if (best === undefined || comparePluginVersion(entry, best) > 0) best = entry;
   }
   return best === undefined ? undefined : join(slot, best);
+}
+
+function comparePluginVersion(left: string, right: string): number {
+  if (left === 'local') return right === 'local' ? 0 : 1;
+  if (right === 'local') return -1;
+  const parse = (value: string): { numbers: number[]; prerelease?: string } | null => {
+    const match = value.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u);
+    return match === null ? null : { numbers: [Number(match[1]), Number(match[2]), Number(match[3])], ...(match[4] === undefined ? {} : { prerelease: match[4] }) };
+  };
+  const l = parse(left);
+  const r = parse(right);
+  if (l !== null && r !== null) {
+    for (let index = 0; index < 3; index += 1) if (l.numbers[index] !== r.numbers[index]) return (l.numbers[index] ?? 0) - (r.numbers[index] ?? 0);
+    if (l.prerelease === undefined && r.prerelease !== undefined) return 1;
+    if (l.prerelease !== undefined && r.prerelease === undefined) return -1;
+    if (l.prerelease !== undefined && r.prerelease !== undefined) return comparePrerelease(l.prerelease, r.prerelease);
+    return 0;
+  }
+  return left.localeCompare(right);
+}
+
+function comparePrerelease(left: string, right: string): number {
+  const l = left.split('.'); const r = right.split('.');
+  for (let index = 0; index < Math.max(l.length, r.length); index += 1) {
+    const a = l[index]; const b = r[index];
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+    if (a === b) continue;
+    const an = /^\d+$/u.test(a); const bn = /^\d+$/u.test(b);
+    if (an && bn) return Number(a) - Number(b);
+    if (an) return -1;
+    if (bn) return 1;
+    return a.localeCompare(b);
+  }
+  return 0;
 }
 
 export const codex: HostReader = {
@@ -98,7 +133,7 @@ export const codex: HostReader = {
       const at = id.indexOf('@');
       const name = at === -1 ? id : id.slice(0, at);
       const marketplace = at === -1 ? undefined : id.slice(at + 1);
-      const path = marketplace !== undefined ? cacheDirFor(marketplace, name) : undefined;
+      const path = enabled && marketplace !== undefined ? cacheDirFor(marketplace, name) : undefined;
       const plugin: InstalledPlugin = { id, name, enabled };
       if (marketplace !== undefined) plugin.marketplace = marketplace;
       if (path !== undefined) {

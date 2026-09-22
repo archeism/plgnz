@@ -1,5 +1,11 @@
 # codex store layout
 
+## plgnz lifecycle projection
+
+Codex activates `local` ahead of every version; otherwise its store compares semantic versions and falls back to lexical ordering. plgnz therefore materializes a plugin at its manifest version (or `local` when absent), not at a Git SHA. It stages the Codex projection in the same cache slot, validates it, then swaps the owned version directory only after the stage succeeds.
+
+Each plgnz-created version root contains `.plgnz-install.json` with its source identity, native plugin id, and content fingerprint. An exact re-add compares staged bytes before leaving that root untouched; changed bytes from the same source refresh the same version. A foreign root is adopted only when its bytes match the staged representation excluding that marker. Different foreign roots, winning foreign versions, different owned source identities, and symlinked managed slots are refused. Activation keeps the old root as a filesystem-rename backup until config enable succeeds. Removal deletes only marked versions for the requested native id; it removes an otherwise-empty plugin table or disables a table with user fields.
+
 Measured 2026-09-16 on this machine (`~/.codex`). Reader: `src/hosts/codex.ts`.
 
 ## Store
@@ -19,13 +25,18 @@ Measured 2026-09-16 on this machine (`~/.codex`). Reader: `src/hosts/codex.ts`.
   skills/<skill>/SKILL.md
 ```
 
+For converted Agent Plugins without a native manifest, plgnz writes a minimal
+`.codex-plugin/plugin.json` containing only `name`, `version`, `description`,
+and `skills`. The isolated `codex app-server` loader probe on 2026-09-22 loaded
+the resulting skill as `loader-probe:hello` from an isolated `CODEX_HOME`.
+
 ## Reader decisions
 
 - **Plugin MCP source priority**: `.codex-plugin/plugin.json` (its `mcpServers`
   pointer resolved against the plugin root), then `.mcp.json`, then `mcp.json`
   — all read, identical entries deduped.
-- Install dirs are keyed by version; when several exist the lexicographically
-  highest subdir is picked (only single-version slots measured).
+- Install dirs are keyed by version; `local` wins, then semantic version order,
+  then lexical fallback.
 - Native commands may use `${CODEX_PLUGIN_ROOT}` (measured:
   `cache/air-local/alp/0.1.43/.mcp.json`); doctor expands it against the
   plugin root. A spec `mcp.json` `command` must not contain placeholders

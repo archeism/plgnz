@@ -3,13 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node
 import { join, basename, isAbsolute, resolve } from 'node:path';
 import { cacheRoot } from './paths';
 import { isGitUrl } from './exec';
-
-declare const Bun: {
-  CryptoHasher: new (algorithm: 'sha256') => {
-    update(input: string | Uint8Array): void;
-    digest(encoding: 'hex'): string;
-  };
-};
+import { fingerprintTree } from './fingerprint';
 
 export interface PluginSource {
   dir: string;
@@ -129,25 +123,6 @@ function withFingerprint(plugin: PluginSource): PluginSource {
   return { ...plugin, contentFingerprint: fingerprintTree(plugin.dir) };
 }
 
-function fingerprintTree(root: string): string {
-  const hash = new Bun.CryptoHasher('sha256');
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir).sort()) {
-      const path = join(dir, entry);
-      const stat = statSync(path);
-      if (stat.isDirectory()) walk(path);
-      else if (stat.isFile()) {
-        hash.update(path.slice(root.length + 1));
-        hash.update(new Uint8Array([0]));
-        hash.update(readBytes(path));
-        hash.update(new Uint8Array([0]));
-      }
-    }
-  };
-  walk(root);
-  return hash.digest('hex');
-}
-
 function assertSafeSourceTree(path: string): string {
   assertNoSymlinks(path);
   const canonical = realpath(path);
@@ -180,11 +155,6 @@ function realpath(path: string): string {
 
 function isInside(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(`${root}/`);
-}
-
-function readBytes(path: string): Uint8Array {
-  const read = readFileSync as unknown as (file: string) => Uint8Array;
-  return read(path);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

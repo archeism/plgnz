@@ -6,18 +6,21 @@ import { runDoctor, formatFinding, type DoctorFinding } from './doctor';
 import { hosts } from './hosts';
 import { writers } from './hosts/writers';
 import { resolveSource } from './source';
-import { readState } from './state';
+import { findRecord, readState } from './state';
 import { writeState } from './state-write';
 import type { InstallRecord } from './state';
 import { runPin } from './pin';
 import { runUpdate } from './update';
+import { fingerprintTree } from './fingerprint';
+import type { HostReader, InstallOutcome } from './host';
+import packageJson from '../package.json' with { type: 'json' };
 
 const USAGE = `plgnz — install, diagnose and update agent plugins and MCP configs
 
 usage: plgnz <verb> [options]
 
 verbs:
-  add <source> [--target <host>…]   install a plugin into each host's native store
+  add <source> [--target <host>…] [--adopt-existing] install a plugin into each host's native store
   doctor [--json]                   dead commands, shadowed entries, stale installs (read-only)
   pin [--target <host>] [--all]     rewrite bare commands to absolute paths for GUI hosts
                                     (default targets: the GUI hosts; --all for every host)
@@ -32,24 +35,37 @@ verbs:
 interface VerbFlags {
   positionals: string[];
   targets: string[];
+  plugins: string[];
   all: boolean;
   dryRun: boolean;
+  adoptExisting: boolean;
+  errors: string[];
 }
 
 function parseFlags(args: string[]): VerbFlags {
-  const flags: VerbFlags = { positionals: [], targets: [], all: false, dryRun: false };
+  const flags: VerbFlags = { positionals: [], targets: [], plugins: [], all: false, dryRun: false, adoptExisting: false, errors: [] };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--target' || arg === '-t') {
       const value = args[i + 1];
-      if (value !== undefined) {
+      if (value !== undefined && !value.startsWith('-')) {
         flags.targets.push(value);
         i++;
-      }
+      } else flags.errors.push(`${arg} requires a value`);
+    } else if (arg === '--plugin') {
+      const value = args[i + 1];
+      if (value !== undefined && !value.startsWith('-')) {
+        flags.plugins.push(value);
+        i++;
+      } else flags.errors.push('--plugin requires a value');
     } else if (arg === '--all') {
       flags.all = true;
     } else if (arg === '--dry-run') {
       flags.dryRun = true;
+    } else if (arg === '--adopt-existing') {
+      flags.adoptExisting = true;
+    } else if (arg !== undefined && arg.startsWith('-')) {
+      flags.errors.push(`unknown option '${arg}'`);
     } else if (arg !== undefined) {
       flags.positionals.push(arg);
     }
@@ -57,10 +73,50 @@ function parseFlags(args: string[]): VerbFlags {
   return flags;
 }
 
+function selectPlugins<T extends { name: string }>(plugins: readonly T[], requested: readonly string[]): { selected: T[]; error?: string } {
+  const duplicate = requested.find((name, index) => requested.indexOf(name) !== index);
+  if (duplicate !== undefined) return { selected: [], error: `duplicate plugin selector '${duplicate}'` };
+  const known = new Map(plugins.map((plugin) => [plugin.name, plugin]));
+  for (const name of requested) if (!known.has(name)) return { selected: [], error: `unknown plugin '${name}' (available: ${[...known.keys()].join(', ')})` };
+  return { selected: requested.length === 0 ? [...plugins] : requested.map((name) => known.get(name)!) };
+}
+
+function rejectDisallowed(flags: VerbFlags, allowed: ReadonlySet<'target' | 'plugin' | 'all' | 'dryRun' | 'adoptExisting'>): string | undefined {
+  if (flags.errors.length > 0) return flags.errors.join('; ');
+  if (flags.targets.length > 0 && !allowed.has('target')) return '--target is not supported by this verb';
+  if (flags.plugins.length > 0 && !allowed.has('plugin')) return '--plugin is only supported by add';
+  if (flags.all && !allowed.has('all')) return '--all is not supported by this verb';
+  if (flags.dryRun && !allowed.has('dryRun')) return '--dry-run is not supported by this verb';
+  if (flags.adoptExisting && !allowed.has('adoptExisting')) return '--adopt-existing is only supported by add';
+  return undefined;
+}
+
 /** Findings print the same way doctor's do: `<host>  <mark>  <message>`. */
 function printFindings(findings: readonly DoctorFinding[], json: boolean): void {
   if (json) console.log(JSON.stringify(findings, null, 2));
   else for (const f of findings) console.log(formatFinding(f));
+}
+
+function printOutcomes(outcomes: readonly InstallOutcome[], json: boolean): void {
+  if (json) console.log(JSON.stringify(outcomes, null, 2));
+  else for (const outcome of outcomes) console.log(`${outcome.target}\t${outcome.status}\t${outcome.plugin}${outcome.diagnostic ? `\t${outcome.diagnostic}` : ''}`);
+}
+
+function select<T extends HostReader>(available: readonly T[], targets: readonly string[]): { selected: T[]; error?: string } {
+  const known = new Map(available.map((host) => [host.id, host]));
+  const duplicate = targets.find((target, index) => targets.indexOf(target) !== index);
+  if (duplicate !== undefined) return { selected: [], error: `duplicate target '${duplicate}'` };
+  for (const target of targets) if (!known.has(target)) return { selected: [], error: `unknown target '${target}' (known: ${[...known.keys()].join(', ')})` };
+  const selected = targets.length === 0 ? [...available] : targets.map((target) => known.get(target)!);
+  const absent = selected.find((host) => !host.detect());
+  if (absent !== undefined && targets.length > 0) return { selected: [], error: `requested target '${absent.id}' is not present on this machine` };
+  return { selected: selected.filter((host) => host.detect()) };
+}
+
+async function withoutConsole<T>(fn: () => Promise<T>): Promise<T> {
+  const original = console.log;
+  console.log = () => {};
+  try { return await fn(); } finally { console.log = original; }
 }
 
 function fail(message: string, code: number): never {
@@ -73,19 +129,35 @@ export async function main(argv: string[]): Promise<number> {
   const json = argv.length !== args.length;
   const verb = args[0];
 
+  if (verb === '--version' || verb === '-v' || verb === 'version') {
+    if (args.length > 1) fail('plgnz version: unexpected argument', 2);
+    console.log(json ? JSON.stringify({ name: 'plgnz', version: packageJson.version }) : packageJson.version);
+    return 0;
+  }
+
   if (verb === undefined || verb === 'help' || verb === '--help' || verb === '-h') {
     console.log(USAGE);
     return verb === undefined ? 2 : 0;
   }
   if (verb === 'doctor') {
-    if (args.length > 1) fail(`plgnz doctor: unexpected argument: ${args[1]}`, 2);
-    const { findings, exitCode } = runDoctor();
+    const flags = parseFlags(args.slice(1));
+    if (rejectDisallowed(flags, new Set(['target'])) || flags.positionals.length > 0) fail(`plgnz doctor: unexpected argument`, 2);
+    const selection = select(hosts, flags.targets);
+    if (selection.error) {
+      if (json) printOutcomes(flags.targets.map((target) => ({ plugin: '*', target, status: 'failed', dryRun: false, diagnostic: selection.error })), true);
+      else console.error(`plgnz doctor: ${selection.error}`);
+      return 2;
+    }
+    const { findings, exitCode } = runDoctor(selection.selected);
     if (json) console.log(JSON.stringify(findings, null, 2));
     else for (const f of findings) console.log(formatFinding(f));
     return exitCode;
   }
   
   if (verb === 'targets') {
+    const flags = parseFlags(args.slice(1));
+    const disallowed = rejectDisallowed(flags, new Set());
+    if (disallowed || flags.positionals.length > 0) fail(`plgnz targets: ${disallowed ?? 'unexpected argument'}`, 2);
     const present = hosts.filter(h => h.detect());
     if (json) {
       console.log(JSON.stringify(present.map(h => h.id), null, 2));
@@ -95,92 +167,241 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (verb === 'list') {
+    const flags = parseFlags(args.slice(1));
+    if (rejectDisallowed(flags, new Set(['target'])) || flags.positionals.length > 0) fail(`plgnz list: unexpected argument`, 2);
+    const selection = select(hosts, flags.targets);
+    if (selection.error) {
+      if (json) printOutcomes(flags.targets.map((target) => ({ plugin: '*', target, status: 'failed', dryRun: false, diagnostic: selection.error })), true);
+      else console.error(`plgnz list: ${selection.error}`);
+      return 2;
+    }
+    const state = readState();
     const all: any[] = [];
-    for (const h of hosts) {
-      if (!h.detect()) continue;
+    for (const h of selection.selected) {
       const installed = h.listInstalled();
+      const pending = state.filter((record) => record.host === h.id && record.pending !== undefined)
+        .map((record) => ({ id: record.id, action: record.pending }));
       if (json) {
-        all.push({ host: h.id, plugins: installed });
+        all.push({ host: h.id, plugins: installed, ...(pending.length > 0 ? { pending } : {}) });
       } else {
         for (const p of installed) {
           console.log(`${h.id}\t${p.id}\t${p.version || p.sha || 'unknown'}`);
         }
+        for (const record of pending) console.log(`${h.id}\t${record.id}\tpending:${record.action}`);
       }
     }
     if (json) console.log(JSON.stringify(all, null, 2));
     return 0;
   }
   if (verb === 'remove') {
-    const target = args[1];
-    if (!target) fail(`plgnz remove: missing plugin id`, 2);
-    let state = readState();
-    for (const w of writers) {
-      if (!w.detect()) continue;
-      await w.remove(target);
+    const flags = parseFlags(args.slice(1));
+    const target = flags.positionals[0];
+    if (rejectDisallowed(flags, new Set(['target', 'dryRun'])) || !target || flags.positionals.length > 1) fail(`plgnz remove: missing or unexpected plugin id`, 2);
+    const selection = select(writers, flags.targets);
+    if (selection.error) {
+      printOutcomes(flags.targets.map((host) => ({ plugin: target, target: host, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
+      return 2;
     }
-    state = state.filter(r => r.id !== target);
-    writeState(state);
-    return 0;
+    if (selection.selected.length === 0) {
+      printOutcomes([{ plugin: target, target: '*', status: 'failed', action: 'remove', dryRun: flags.dryRun, diagnostic: 'No detected writer targets' }], json);
+      return 1;
+    }
+    let state: InstallRecord[];
+    try { state = readState(); }
+    catch (error) {
+      printOutcomes([{ plugin: target, target: '*', status: 'failed', action: 'remove', dryRun: flags.dryRun, diagnostic: (error as Error).message }], json);
+      return 1;
+    }
+    const outcomes: InstallOutcome[] = [];
+    for (const w of selection.selected) {
+      const record = findRecord(state, w.id, target);
+      const owned = record !== undefined && (record.ownership === 'plgnz' || record.ownership === undefined);
+      if (!owned || record?.pending === 'install') {
+        outcomes.push({ plugin: target, target: w.id, status: 'failed', action: 'remove', dryRun: flags.dryRun, diagnostic: record?.pending === 'install' ? 'install is pending; refusing removal' : 'no owned install record; refusing removal' });
+        continue;
+      }
+      if (flags.dryRun) {
+        outcomes.push({ plugin: target, target: w.id, status: 'installed', action: 'remove', dryRun: true });
+        continue;
+      }
+      try {
+        const pending = { ...record, pending: 'remove' as const };
+        const pendingState = state.map((candidate) => candidate === record ? pending : candidate);
+        writeState(pendingState);
+        state = pendingState;
+        await w.remove(target);
+        const finalized = state.filter((candidate) => candidate !== pending);
+        writeState(finalized);
+        state = finalized;
+        outcomes.push({ plugin: target, target: w.id, status: 'installed', action: 'remove', dryRun: false });
+      } catch (error) {
+        outcomes.push({ plugin: target, target: w.id, status: 'failed', action: 'remove', dryRun: false, diagnostic: (error as Error).message });
+      }
+    }
+    printOutcomes(outcomes, json);
+    return outcomes.some((outcome) => outcome.status === 'failed') ? 1 : 0;
   }
   if (verb === 'add') {
     const flags = parseFlags(args.slice(1));
+    const outcomes: InstallOutcome[] = [];
+    let activeTarget = '*';
+    let activePlugin = '*';
+    let expected: Array<{ plugin: string; target: string }> = [];
+    const disallowed = rejectDisallowed(flags, new Set(['target', 'plugin', 'dryRun', 'adoptExisting']));
+    if (disallowed) {
+      if (json) printOutcomes([{ plugin: '*', target: '*', status: 'failed', dryRun: flags.dryRun, diagnostic: disallowed }], true);
+      else console.error(`plgnz add: ${disallowed}`);
+      return 2;
+    }
     if (flags.positionals.length > 1) fail(`plgnz add: unexpected argument: ${flags.positionals[1]}`, 2);
     const sourceArg = flags.positionals[0];
     if (sourceArg === undefined) fail(`plgnz add: missing source`, 2);
 
     try {
+      const selection = select(writers, flags.targets);
+      if (selection.error) {
+        printOutcomes(flags.targets.map((target) => ({ plugin: '*', target, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
+        return 2;
+      }
+      if (flags.adoptExisting) {
+        const unsupported = selection.selected.find((writer) => writer.supportsAdoption !== true);
+        if (unsupported !== undefined) {
+          const diagnostic = `target '${unsupported.id}' does not support --adopt-existing`;
+          printOutcomes(selection.selected.map((writer) => ({ plugin: '*', target: writer.id, status: 'unsupported' as const, action: 'install' as const, dryRun: flags.dryRun, diagnostic })), json);
+          return 2;
+        }
+      }
       const resolved = resolveSource(sourceArg);
+      const pluginSelection = selectPlugins(resolved.plugins, flags.plugins);
+      if (pluginSelection.error) {
+        printOutcomes([{ plugin: '*', target: '*', status: 'failed', dryRun: flags.dryRun, diagnostic: pluginSelection.error }], json);
+        return 2;
+      }
+      if (selection.selected.length === 0) throw new Error('No detected writer targets');
+      expected = selection.selected.flatMap((writer) => pluginSelection.selected.map((plugin) => ({ plugin: plugin.name, target: writer.id })));
+      activeTarget = expected[0]?.target ?? '*';
+      activePlugin = expected[0]?.plugin ?? '*';
       let state = readState();
-      for (const w of writers) {
-        if (!w.detect()) continue;
-        if (flags.targets.length > 0 && !flags.targets.includes(w.id)) continue;
-        for (const plugin of resolved.plugins) {
-          await w.add(plugin, resolved, { dryRun: flags.dryRun });
-          if (!flags.dryRun) {
-            const installed = w.listInstalled(); const match = installed.find(p => p.name === plugin.name && (!plugin.marketplace || p.marketplace === plugin.marketplace)); const id = match ? match.id : (plugin.marketplace ? `${plugin.name}@${plugin.marketplace}` : plugin.name);
-            const idx = state.findIndex(r => r.host === w.id && r.id === id);
+      for (const w of selection.selected) {
+        activeTarget = w.id;
+        for (const plugin of pluginSelection.selected) {
+          activePlugin = plugin.name;
+          const nativeId = plugin.marketplace ? `${plugin.name}@${plugin.marketplace}` : plugin.name;
+          if (flags.dryRun) {
+            if (json) await withoutConsole(() => w.add(plugin, resolved, { dryRun: true, adoptExisting: flags.adoptExisting }));
+            else await w.add(plugin, resolved, { dryRun: true, adoptExisting: flags.adoptExisting });
+            outcomes.push({ plugin: plugin.name, target: w.id, status: 'installed', action: 'install', dryRun: true, nativeId });
+          } else {
+            const expectedIds = new Set([nativeId, plugin.name, `${plugin.name}@${plugin.marketplace ?? 'local'}`]);
+            const idx = state.findIndex(r => r.host === w.id && expectedIds.has(r.id));
             const previous = idx !== -1 ? state[idx] : undefined;
             const rec: InstallRecord = {
+              ...(previous ?? {
               host: w.id,
-              id,
+              id: nativeId,
+              }),
               source: resolved.sourceUri,
               sourceSha: resolved.sha,
-              installedAt: new Date().toISOString()
+              ownership: previous?.ownership ?? 'plgnz',
+              pending: 'install',
             };
-            // Pins carry over a re-add: the fresh copy is bare again, so the
-            // record keeps saying which servers this install wants pinned and
-            // `update` re-applies them.
-            if (previous?.pins !== undefined) rec.pins = previous.pins;
-            if (idx !== -1) state[idx] = rec;
-            else state.push(rec);
+            const pendingState = idx === -1 ? [...state, rec] : state.map((candidate) => candidate === previous ? rec : candidate);
+            writeState(pendingState);
+            state = pendingState;
+            const writerResult = await w.add(plugin, resolved, { dryRun: false, adoptExisting: flags.adoptExisting });
+            const installed = w.listInstalled();
+            const expectedMarketplace = plugin.marketplace ?? 'local';
+            const match = installed.find(p => expectedIds.has(p.id) && p.name === plugin.name &&
+              (p.marketplace === expectedMarketplace || (expectedMarketplace === 'local' && p.marketplace === undefined)) && p.enabled !== false);
+            if (match?.path === undefined) throw new Error(`native install readback is missing ${nativeId}`);
+            const finalized: InstallRecord = {
+              ...rec,
+              id: match?.id ?? nativeId,
+              source: resolved.sourceUri,
+              sourceSha: resolved.sha,
+              installedAt: new Date().toISOString(),
+              sourceDir: plugin.dir,
+              installedFingerprint: fingerprintTree(match.path),
+              ...(plugin.contentFingerprint !== undefined ? { fingerprint: plugin.contentFingerprint } : {}),
+            };
+            delete finalized.pending;
+            const finalizedState = state.map((candidate) => candidate === rec ? finalized : candidate);
+            writeState(finalizedState);
+            state = finalizedState;
+            outcomes.push({ plugin: plugin.name, target: w.id, status: writerResult === 'unchanged' ? 'unchanged' : 'installed', action: 'install', dryRun: false, nativeId });
           }
         }
       }
-      if (!flags.dryRun) writeState(state);
+      printOutcomes(outcomes, json);
     } catch (e: any) {
-      fail(e.message, 1);
+      const reported = new Set(outcomes.map((outcome) => `${outcome.plugin}\u0000${outcome.target}`));
+      const failures: InstallOutcome[] = [];
+      if (expected.length === 0) {
+        failures.push({ plugin: '*', target: activeTarget, status: 'failed', action: 'install', dryRun: flags.dryRun, diagnostic: e.message });
+      } else {
+        for (const pair of expected) {
+          const key = `${pair.plugin}\u0000${pair.target}`;
+          if (reported.has(key)) continue;
+          failures.push({
+            plugin: pair.plugin,
+            target: pair.target,
+            status: 'failed',
+            action: 'install',
+            dryRun: flags.dryRun,
+            diagnostic: pair.plugin === activePlugin && pair.target === activeTarget ? e.message : 'not attempted after an earlier install failure',
+          });
+        }
+      }
+      if (json) printOutcomes([...outcomes, ...failures], true);
+      else console.error(e.message);
+      return 1;
     }
     return 0;
   }
   if (verb === 'pin') {
     const flags = parseFlags(args.slice(1));
-    if (flags.positionals.length > 0) fail(`plgnz pin: unexpected argument: ${flags.positionals[0]}`, 2);
+    if (rejectDisallowed(flags, new Set(['target', 'all', 'dryRun'])) || flags.positionals.length > 0) fail(`plgnz pin: unexpected argument: ${flags.positionals[0]}`, 2);
     const known = new Set(writers.map((w) => w.id));
     for (const target of flags.targets) {
       if (!known.has(target)) {
         fail(`plgnz pin: unknown target '${target}' (known: ${[...known].join(', ')})`, 2);
       }
     }
-    const result = await runPin({ targets: flags.targets, all: flags.all, dryRun: flags.dryRun });
+    const candidates = flags.targets.length > 0
+      ? writers.filter((writer) => flags.targets.includes(writer.id))
+      : flags.all ? [...writers] : writers.filter((writer) => writer.gui);
+    const detected = candidates.filter((writer) => writer.detect());
+    if (detected.length === 0) {
+      console.error('plgnz pin: No detected writer targets');
+      return 1;
+    }
+    const result = await runPin({ targets: flags.targets, all: flags.all, dryRun: flags.dryRun, writers: detected });
     printFindings(result.findings, json);
     return result.exitCode;
   }
   if (verb === 'update') {
     const flags = parseFlags(args.slice(1));
-    if (flags.positionals.length > 1) fail(`plgnz update: unexpected argument: ${flags.positionals[1]}`, 2);
-    const result = await runUpdate(flags.positionals[0], { dryRun: flags.dryRun });
-    printFindings(result.findings, json);
-    return result.exitCode;
+    if (rejectDisallowed(flags, new Set(['target', 'dryRun'])) || flags.positionals.length > 1) fail(`plgnz update: unexpected argument: ${flags.positionals[1]}`, 2);
+    const selection = select(writers, flags.targets);
+    if (selection.error) {
+      printOutcomes(flags.targets.map((target) => ({ plugin: flags.positionals[0] ?? '*', target, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
+      return 2;
+    }
+    if (selection.selected.length === 0) {
+      printOutcomes([{ plugin: flags.positionals[0] ?? '*', target: '*', status: 'failed', dryRun: flags.dryRun, diagnostic: 'No detected writer targets' }], json);
+      return 1;
+    }
+    try {
+      const result = json && flags.dryRun
+        ? await withoutConsole(() => runUpdate(flags.positionals[0], { dryRun: true, writers: selection.selected }))
+        : await runUpdate(flags.positionals[0], { dryRun: flags.dryRun, writers: selection.selected });
+      if (json) printOutcomes(result.findings.map((finding) => ({ plugin: flags.positionals[0] ?? '*', target: finding.host, status: finding.mark === '✓' ? 'installed' : finding.mark === '!' ? 'unverified' : 'failed', action: 'update', dryRun: flags.dryRun, diagnostic: finding.message })), true);
+      else printFindings(result.findings, false);
+      return result.exitCode;
+    } catch (error) {
+      printOutcomes([{ plugin: flags.positionals[0] ?? '*', target: '*', status: 'failed', action: 'update', dryRun: flags.dryRun, diagnostic: (error as Error).message }], json);
+      return 1;
+    }
   }
 
   fail(`plgnz: unknown verb '${verb}'\n\n${USAGE}`, 2);

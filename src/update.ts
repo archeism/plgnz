@@ -22,6 +22,7 @@ import { writers as allWriters } from './hosts/writers';
 import { resolveSource, type PluginSource } from './source';
 import { readState, type InstallRecord } from './state';
 import { writeState } from './state-write';
+import { fingerprintTree } from './fingerprint';
 
 export interface UpdateFinding {
   host: string;
@@ -40,6 +41,8 @@ export interface UpdateOptions {
   state?: InstallRecord[];
   /** Hosts to consider; defaults to the registry. */
   writers?: readonly HostWriter[];
+  /** Test seam for ledger persistence failure regressions. */
+  writeState?: (records: InstallRecord[]) => void;
 }
 
 /** The plugin name part of a host-native id (`name@marketplace` or bare name). */
@@ -58,11 +61,13 @@ function shortSha(sha: string): string {
 
 export async function runUpdate(name?: string, options: UpdateOptions = {}): Promise<UpdateResult> {
   const hosts = options.writers ?? allWriters;
-  const state = options.state ?? readState();
+  let state = options.state ?? readState();
+  const save = options.writeState ?? writeState;
   const prefix = options.dryRun === true ? '[dry-run] ' : '';
   const findings: UpdateFinding[] = [];
 
-  const records = name === undefined ? state : state.filter((r) => r.id === name || idName(r.id) === name);
+  const selectedHosts = new Set(hosts.map((host) => host.id));
+  const records = state.filter((record) => selectedHosts.has(record.host)).filter((record) => name === undefined || record.id === name || idName(record.id) === name);
   if (name !== undefined && records.length === 0) {
     findings.push({
       host: 'plgnz',
@@ -80,7 +85,10 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
     return { findings, exitCode: 0 };
   }
 
-  for (const record of records) {
+  for (const initialRecord of records) {
+    const found = state.find((candidate) => candidate.host === initialRecord.host && candidate.id === initialRecord.id);
+    if (found === undefined) continue;
+    let record: InstallRecord = found;
     const host = hosts.find((w) => w.id === record.host);
     if (host === undefined) {
       findings.push({
@@ -96,6 +104,10 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
         mark: '!',
         message: `host not present on this machine — '${record.id}' skipped`,
       });
+      continue;
+    }
+    if (record.pending === 'remove') {
+      findings.push({ host: host.id, mark: '✗', message: `removal of '${record.id}' is pending — retry remove before update` });
       continue;
     }
 
@@ -122,6 +134,13 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
     }
 
     try {
+      if (options.dryRun !== true) {
+        const pending = { ...record, pending: 'install' as const };
+        const next = state.map((candidate) => candidate === record ? pending : candidate);
+        save(next);
+        state = next;
+        record = pending;
+      }
       await host.add(plugin, resolved, { dryRun: options.dryRun });
     } catch (e) {
       findings.push({
@@ -131,21 +150,41 @@ export async function runUpdate(name?: string, options: UpdateOptions = {}): Pro
       });
       continue;
     }
-    findings.push({
-      host: host.id,
-      mark: '✓',
-      message: `${prefix}updated '${record.id}' from ${record.source} → ${shortSha(resolved.sha)}`,
-    });
+    let pinsOk: boolean;
+    try {
+      pinsOk = await repin(host, record, plugin, options, findings, prefix);
+    } catch (error) {
+      findings.push({ host: host.id, mark: '✗', message: `updated '${record.id}' but pin finalization failed — ${(error as Error).message}` });
+      continue;
+    }
+    if (!pinsOk) continue;
 
-    await repin(host, record, plugin, options, findings, prefix);
-
-    if (options.dryRun !== true) {
-      record.sourceSha = resolved.sha;
-      record.installedAt = new Date().toISOString();
+    if (options.dryRun === true) {
+      findings.push({ host: host.id, mark: '✓', message: `${prefix}updated '${record.id}' from ${record.source} → ${shortSha(resolved.sha)}` });
+      continue;
+    }
+    try {
+      const installed = host.listInstalled().find((candidate) => candidate.id === record.id);
+      if (installed === undefined || installed.enabled === false || installed.path === undefined) throw new Error('updated native representation is not enabled or has no readable path');
+      const finalized: InstallRecord = {
+        ...record,
+        sourceSha: resolved.sha,
+        installedAt: new Date().toISOString(),
+        ownership: record.ownership ?? 'plgnz',
+        sourceDir: plugin.dir,
+        installedFingerprint: fingerprintTree(installed.path),
+        ...(plugin.contentFingerprint !== undefined ? { fingerprint: plugin.contentFingerprint } : {}),
+      };
+      delete finalized.pending;
+      const next = state.map((candidate) => candidate === record ? finalized : candidate);
+      save(next);
+      state = next;
+      findings.push({ host: host.id, mark: '✓', message: `updated '${record.id}' from ${record.source} → ${shortSha(resolved.sha)}` });
+    } catch (error) {
+      findings.push({ host: host.id, mark: '✗', message: `updated '${record.id}' but could not finalize its ledger record — ${(error as Error).message}` });
     }
   }
 
-  if (options.dryRun !== true) writeState(state);
   return { findings, exitCode: findings.some((f) => f.mark === '✗') ? 1 : 0 };
 }
 
@@ -157,9 +196,9 @@ async function repin(
   options: UpdateOptions,
   findings: UpdateFinding[],
   prefix: string,
-): Promise<void> {
+): Promise<boolean> {
   const pins = record.pins ?? [];
-  if (pins.length === 0) return;
+  if (pins.length === 0) return true;
   const installed: InstalledPlugin | undefined = host.listInstalled().find((p) => p.id === record.id);
   if (installed === undefined) {
     findings.push({
@@ -167,7 +206,7 @@ async function repin(
       mark: '!',
       message: `cannot re-apply pins for '${record.id}' — not found in the ${host.id} store after the update`,
     });
-    return;
+    return false;
   }
   const outcome = await host.pin(installed, { only: pins, dryRun: options.dryRun });
   for (const change of outcome.changes) {
@@ -186,4 +225,5 @@ async function repin(
         `not found on PATH (plugin ${plugin.name})`,
     });
   }
+  return outcome.refusals.length === 0;
 }

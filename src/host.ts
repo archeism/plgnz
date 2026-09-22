@@ -65,6 +65,21 @@ export interface HostReader {
 export interface AddOptions {
   target?: string;
   dryRun?: boolean;
+  /** Explicitly replace one selected, proven legacy native install. */
+  adoptExisting?: boolean;
+}
+
+export type InstallStatus = 'installed' | 'unchanged' | 'unsupported' | 'unverified' | 'failed';
+
+/** Generic mutation result; readers keep their host-native data shapes. */
+export interface InstallOutcome {
+  plugin: string;
+  target: string;
+  status: InstallStatus;
+  dryRun: boolean;
+  diagnostic?: string;
+  nativeId?: string;
+  action?: 'install' | 'update' | 'remove';
 }
 
 export interface PinOptions {
@@ -98,7 +113,9 @@ export interface PinOutcome {
 import type { PluginSource, ResolvedSource } from './source';
 
 export interface HostWriter extends HostReader {
-  add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void>;
+  /** Whether this writer implements explicit legacy adoption. */
+  readonly supportsAdoption?: boolean;
+  add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void | 'unchanged'>;
   remove(id: string): Promise<void>;
   /**
    * Rewrite every *bare* stdio `command` in this plugin's installed copy to the

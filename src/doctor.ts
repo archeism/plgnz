@@ -36,6 +36,7 @@ import type { HostReader, McpServerEntry } from './host';
 import { hosts as allHosts } from './hosts';
 import { findRecord, readState, type InstallRecord } from './state';
 import { expandRootPlaceholders, gitHead, gitRemoteHead, isExecutableFile, isGitUrl, resolveCommandPath, which } from './exec';
+import { fingerprintTree } from './fingerprint';
 
 export type Mark = '✓' | '✗' | '!';
 
@@ -43,6 +44,58 @@ export interface DoctorFinding {
   host: string;
   mark: Mark;
   message: string;
+  check?: 'content';
+  pluginId?: string;
+}
+
+function contentFinding(host: string, pluginId: string, mark: Mark, message: string): DoctorFinding {
+  return { host, pluginId, check: 'content', mark, message };
+}
+
+/** Verify source bytes and the activated native tree independently of git freshness. */
+function checkContent(host: HostReader, state: InstallRecord[], out: DoctorFinding[]): void {
+  const installed = new Map(host.listInstalled().map((plugin) => [plugin.id, plugin]));
+  const records = state.filter((record) => record.host === host.id);
+  for (const record of records) {
+    if (record.pending !== undefined) {
+      out.push(contentFinding(host.id, record.id, '!', `install '${record.id}' content unverified — ${record.pending} is pending`));
+      continue;
+    }
+    const native = installed.get(record.id);
+    if (native === undefined || native.enabled === false || native.path === undefined) {
+      out.push(contentFinding(host.id, record.id, '✗', `install '${record.id}' content stale — enabled native representation is missing`));
+      continue;
+    }
+    if (record.sourceDir === undefined || record.fingerprint === undefined || record.installedFingerprint === undefined) {
+      out.push(contentFinding(host.id, record.id, '!', `install '${record.id}' content unverified — legacy record has no complete byte proof`));
+      continue;
+    }
+    let sourceFingerprint: string;
+    try { sourceFingerprint = fingerprintTree(record.sourceDir); }
+    catch (error) {
+      out.push(contentFinding(host.id, record.id, '✗', `install '${record.id}' source content cannot be verified — ${(error as Error).message}`));
+      continue;
+    }
+    if (sourceFingerprint !== record.fingerprint) {
+      out.push(contentFinding(host.id, record.id, '✗', `install '${record.id}' source content changed since activation`));
+      continue;
+    }
+    let nativeFingerprint: string;
+    try { nativeFingerprint = fingerprintTree(native.path); }
+    catch (error) {
+      out.push(contentFinding(host.id, record.id, '✗', `install '${record.id}' native content cannot be verified — ${(error as Error).message}`));
+      continue;
+    }
+    if (nativeFingerprint !== record.installedFingerprint) {
+      out.push(contentFinding(host.id, record.id, '✗', `install '${record.id}' native content changed after activation`));
+      continue;
+    }
+    out.push(contentFinding(host.id, record.id, '✓', `install '${record.id}' source and native content match their recorded byte proofs`));
+  }
+  for (const native of installed.values()) {
+    if (records.some((record) => record.id === native.id)) continue;
+    out.push(contentFinding(host.id, native.id, '!', `install '${native.id}' content unverified — no plgnz record`));
+  }
 }
 
 export interface DoctorResult {
@@ -174,6 +227,7 @@ function checkStaleness(host: HostReader, state: InstallRecord[], out: DoctorFin
       });
       continue;
     }
+    if (record.pending !== undefined) continue;
     // A git-URL source is recorded verbatim by `add` and has no local
     // checkout to rev-parse — its head comes from `git ls-remote`, the same
     // query that resolved the install (src/source.ts).
@@ -200,11 +254,18 @@ function checkStaleness(host: HostReader, state: InstallRecord[], out: DoctorFin
 
 export function runDoctor(hostList: HostReader[] = allHosts, state: InstallRecord[] = readState()): DoctorResult {
   const findings: DoctorFinding[] = [];
+  const selected = new Set(hostList.map((host) => host.id));
+  for (const record of state) {
+    if (record.pending !== undefined && selected.has(record.host)) {
+      findings.push({ host: record.host, mark: '!', message: `install '${record.id}' has pending ${record.pending} intent — retry the ${record.pending === 'remove' ? 'remove' : 'add/update'} operation` });
+    }
+  }
   for (const host of hostList) {
     if (!host.detect()) continue;
     const entries = host.mcpEntries();
     checkCommands(host, entries, findings);
     checkShadows(host, entries, findings);
+    checkContent(host, state, findings);
     checkStaleness(host, state, findings);
   }
   const exitCode = findings.some((f) => f.mark === '✗') ? 1 : 0;
