@@ -79,7 +79,8 @@ Measured 2026-09-16 on this machine (`~/.kimi-code`). Reader: `src/hosts/kimi.ts
   cannot roll back committed active state. Stages are removed in `finally`,
   including dry-run and unchanged paths.
 - **Refresh and ownership.** A `.plgnz-install.json` marker records source,
-  native id, and content fingerprint. Same bytes and marker return unchanged;
+  logical owned id (`name@marketplace` for marketplace sources), and content
+  fingerprint. Same bytes and marker return unchanged;
   changed bytes refresh even at the same version/revision. A differing unowned
   target requires `--adopt-existing`; an exact matching target may be adopted.
   Native removal calls the current native `POST /plugins/<id>:remove` API only
