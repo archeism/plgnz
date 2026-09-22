@@ -4,7 +4,7 @@
  */
 import { runDoctor, formatFinding, type DoctorFinding } from './doctor';
 import { hosts } from './hosts';
-import { writers } from './hosts/writers';
+import { cleanupWriters, writers } from './hosts/writers';
 import { resolveSource } from './source';
 import { findRecord, readState } from './state';
 import { writeState } from './state-write';
@@ -231,7 +231,7 @@ export async function main(argv: string[]): Promise<number> {
     const flags = parseFlags(args.slice(1));
     const target = flags.positionals[0];
     if (rejectDisallowed(flags, new Set(['target', 'dryRun'])) || !target || flags.positionals.length > 1) fail(`plgnz remove: missing or unexpected plugin id`, 2);
-    const selection = select(writers, flags.targets);
+    const selection = select(cleanupWriters, flags.targets);
     if (selection.error) {
       printOutcomes(flags.targets.map((host) => ({ plugin: target, target: host, status: 'failed', dryRun: flags.dryRun, diagnostic: selection.error })), json);
       return 2;
@@ -296,6 +296,11 @@ export async function main(argv: string[]): Promise<number> {
       if (profileSelection.error) {
         printOutcomes(flags.targets.map((target) => ({ plugin: '*', target, status: 'failed', dryRun: flags.dryRun, diagnostic: profileSelection.error })), json);
         return 2;
+      }
+      if (profileSelection.selected.some((profile) => profile.scope === 'excluded-standalone')) {
+        const incompatible = compatibilityOutcomes(profileSelection.selected, ['*'], 'install', flags.dryRun)!;
+        printOutcomes(incompatible, json);
+        return 1;
       }
       if (flags.adoptExisting) {
         const incompatible = compatibilityOutcomes(profileSelection.selected, ['*'], 'install', flags.dryRun);

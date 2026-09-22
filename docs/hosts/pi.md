@@ -1,4 +1,10 @@
-# Pi standalone-skill store
+# Pi standalone-skill store (legacy cleanup only)
+
+Pi standalone distribution is outside the native-plugin migration scope. The
+public `add` and `update` verbs refuse this target without writing a store or
+ledger record. Its reader and remover remain only so an older plgnz-owned
+installation can be inspected and removed safely; this page preserves the
+evidence for that cleanup path.
 
 Measured against Pi 0.80.10. Pi is a standalone-skill route, not a native
 plugin-store route. Its catalog is `~/.pi/agent/skills/`; plgnz resolves this

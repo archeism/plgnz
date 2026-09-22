@@ -1,14 +1,16 @@
 import { test, expect, describe } from 'bun:test';
 import { join } from 'node:path';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { withHostEnvAsync, initGitRepo, writeLedger } from './util';
+import { withHostEnvAsync, initGitRepo, writeFiles, writeLedger } from './util';
 import { main } from '../src/cli';
 import { claudeCode } from '../src/hosts/claude-code';
 import { codex } from '../src/hosts/codex';
 import { cursor } from '../src/hosts/cursor';
 import { kimi } from '../src/hosts/kimi';
 import { omp } from '../src/hosts/omp';
+import { pi } from '../src/hosts/pi';
+import { piWriter } from '../src/hosts/pi-writer';
 import { readState } from '../src/state';
 import { withKimiNative } from './kimi-fixture';
 
@@ -35,6 +37,27 @@ describe('remove', () => {
       expect(codex.listInstalled().some((plugin) => plugin.id === 'demo-plugin@demo-market')).toBe(true);
       expect(await main(['remove', 'demo-plugin@demo-market', '--target', 'codex'])).toBe(1);
       expect(codex.listInstalled().some((plugin) => plugin.id === 'demo-plugin@demo-market')).toBe(true);
+    });
+  });
+
+  test('removes an old plgnz-owned Pi installation through the cleanup-only public route', async () => {
+    await withHostEnvAsync('codex', async (home) => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-pi-cleanup-source-'));
+      writeFiles(sourceDir, {
+        'plugin.json': JSON.stringify({ name: 'demo', version: '1.0.0' }),
+        'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\n---\nbody\n',
+      });
+      await piWriter.add(
+        { dir: sourceDir, name: 'demo', marketplace: 'market', contentFingerprint: 'fixture' },
+        { sourceUri: sourceDir, sha: 'fixture', isGit: false, plugins: [] },
+      );
+      writeLedger(home, [{ host: 'pi', id: 'demo@market', source: sourceDir, sourceSha: 'fixture', ownership: 'plgnz' }]);
+
+      expect(pi.listInstalled().some((plugin) => plugin.id === 'demo@market')).toBe(true);
+      expect(await main(['remove', 'demo@market', '--target', 'pi'])).toBe(0);
+      expect(pi.listInstalled().some((plugin) => plugin.id === 'demo@market')).toBe(false);
+      expect(existsSync(join(home, '.pi', 'agent', 'skills', 'market___demo'))).toBe(false);
+      expect(readState().find((record) => record.host === 'pi')).toBeUndefined();
     });
   });
 

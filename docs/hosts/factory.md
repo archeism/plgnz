@@ -1,10 +1,10 @@
 # Factory / Droid — audit only
 
-Factory is one of the five frozen standalone plugin-skill routes (`SPEC.md`
-§ Compatibility and lifecycle requirements). It has no active plgnz adapter:
-`src/consumer-profiles.ts` registers `factory` as `pending`. Consequently,
-`add` and `update` report `unverified` without host-store or ledger mutation.
-`remove` has no registered adapter and returns a target-selection failure.
+Factory standalone-skill distribution is outside the native-plugin migration
+scope. `src/consumer-profiles.ts` marks `factory` as an excluded standalone
+route, so `add` and `update` report `unsupported` without host-store or ledger
+mutation. `remove` has no registered adapter and returns a target-selection
+failure.
 
 ## Verified
 

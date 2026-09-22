@@ -2,7 +2,11 @@
 summary: Verified Grok Bot skill-home boundary and a deliberately narrow adapter proposal.
 ---
 
-# Grok Bot
+# Grok Bot (excluded standalone route)
+
+Grok Bot standalone-skill distribution is outside the native-plugin migration
+scope. The public `add` and `update` verbs report `unsupported` and make no
+host-store or ledger mutation.
 
 This is **Grok Bot** (`com.anysphere.sand`), not the `grok` Grok Build CLI.
 The configured shared host is `cursor` (`box`), whose house checkout is

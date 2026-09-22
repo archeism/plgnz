@@ -77,6 +77,26 @@ describe('update · re-add from the recorded source', () => {
     });
   });
 
+  test('refuses cleanup-only Pi updates without reading or changing its recorded install', async () => {
+    await withHostEnvAsync('kimi', async (home) => {
+      writeLedger(home, [{ host: 'pi', id: 'demo-plugin', source: '/must-not-read', sourceSha: 'old', ownership: 'plgnz' }]);
+      const before = readFileSync(join(home, 'state.json'), 'utf8');
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['update', '--target', 'pi', '--json'])).toBe(1);
+      } finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; action: string; diagnostic?: string }>;
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]?.target).toBe('pi');
+      expect(outcomes[0]?.status).toBe('unsupported');
+      expect(outcomes[0]?.action).toBe('update');
+      expect(outcomes[0]?.diagnostic).toContain('unsupported for update');
+      expect(readFileSync(join(home, 'state.json'), 'utf8')).toBe(before);
+    });
+  });
+
   test('selected writers leave records for other hosts untouched', async () => {
     await withHostEnvAsync('kimi', async (home) => {
       await withKimiNative(home, async () => {

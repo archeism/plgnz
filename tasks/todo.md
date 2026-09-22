@@ -22,9 +22,7 @@ GitHub is the canonical status tracker: [milestone #1](https://github.com/archei
 | `harness-kimi` | [#18](https://github.com/archeism/plgnz/issues/18) Kimi | #3, #7, #9 |
 | `harness-zcode-cli` | [#19](https://github.com/archeism/plgnz/issues/19) ZCode CLI | #3, #7, #9 |
 | `harness-zcode-desktop` | [#20](https://github.com/archeism/plgnz/issues/20) ZCode Desktop | #3, #7, #9 |
-| `harness-opencode` | [#21](https://github.com/archeism/plgnz/issues/21) OpenCode | #3, #7, #9 |
-| `harness-pi` | [#22](https://github.com/archeism/plgnz/issues/22) Pi | #3, #7, #9 |
-| `harness-gemini-cli` | [#23](https://github.com/archeism/plgnz/issues/23) Gemini CLI | #3, #7, #9 |
-| `harness-factory` | [#24](https://github.com/archeism/plgnz/issues/24) Factory | #3, #7, #9 |
-| `harness-grokbot` | [#25](https://github.com/archeism/plgnz/issues/25) Grok Bot | #3, #7, #9 |
-| `final-parity` | [#26](https://github.com/archeism/plgnz/issues/26) consolidation acceptance | #10–#25 |
+| `harness-gemini-cli` | [#23](https://github.com/archeism/plgnz/issues/23) Gemini CLI native extension (unverified) | #3, #7, #9 |
+| `final-parity` | [#26](https://github.com/archeism/plgnz/issues/26) consolidation acceptance | #10–#20, #23 |
+
+OpenCode, Pi, Factory, and Grok Bot are excluded standalone-skill/command routes. They have no migration task; Pi/OpenCode reader/remover support remains only for safe cleanup of prior plgnz-owned installs. Gemini CLI stays listed because a native extension surface is possible but unverified.

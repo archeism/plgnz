@@ -1,6 +1,7 @@
 /**
- * Frozen consumer inventory from SPEC.md § Compatibility and lifecycle
- * requirements. Profiles describe evidence; they do not make an adapter active.
+ * Native plugin migration inventory plus retired standalone cleanup routes from
+ * SPEC.md § Compatibility and lifecycle requirements. Profiles describe
+ * evidence; they do not make an adapter active.
  */
 import type { CompatibilityStatus, ConsumerCapability } from './compatibility';
 
@@ -14,6 +15,7 @@ export type TargetId = typeof targetIds[number];
 
 export interface ConsumerProfile {
   id: TargetId;
+  scope: 'native-plugin' | 'excluded-standalone';
   surface: string;
   /** Observed version when known; otherwise evidence has not established one. */
   version: string | 'unverified';
@@ -30,6 +32,7 @@ const active: Record<ConsumerCapability, CompatibilityStatus> = {
 
 const pending = (id: TargetId, surface: string, evidence: string, version: ConsumerProfile['version'] = 'unverified'): ConsumerProfile => ({
   id,
+  scope: 'native-plugin',
   surface,
   version,
   evidence,
@@ -37,10 +40,17 @@ const pending = (id: TargetId, surface: string, evidence: string, version: Consu
 });
 
 function profile(id: TargetId, surface: string, evidence: string, version: ConsumerProfile['version'], capabilities: ConsumerProfile['capabilities']): ConsumerProfile {
-  return { id, surface, version, evidence, capabilities };
+  return { id, scope: 'native-plugin', surface, version, evidence, capabilities };
 }
 
-/** Exactly the sixteen target ids frozen by SPEC.md; keep this independent of host adapters. */
+function excludedStandalone(id: TargetId, surface: string, evidence: string, version: ConsumerProfile['version'] = 'unverified'): ConsumerProfile {
+  return {
+    id, scope: 'excluded-standalone', surface, version, evidence,
+    capabilities: { install: 'unsupported', update: 'unsupported', commandProjection: 'unsupported', userOnlySkills: 'unsupported' },
+  };
+}
+
+/** Native plugin routes, with legacy standalone profiles retained only for safe read/remove cleanup. */
 export const consumerProfiles: readonly ConsumerProfile[] = [
   profile('claude-code', 'Claude Code plugin loader', 'docs/hosts/claude-code.md', '2.1.275', active),
   profile('codex', 'Codex plugin loader', 'docs/evidence/codex-personal-20260922.json', '0.153.4', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
@@ -53,11 +63,11 @@ export const consumerProfiles: readonly ConsumerProfile[] = [
   pending('zcode-cli', 'Z.ai ZCode CLI plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('zcode-desktop', 'Z.ai ZCode desktop plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   profile('cursor', 'Cursor local plugin loader', 'docs/hosts/cursor.md', '2026.09.18-9a7762b', active),
-  profile('opencode', 'OpenCode standalone skill and command loaders', 'docs/evidence/opencode-native-loader-20260922.json', '1.15.13', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
-  profile('pi', 'Pi standalone skill loader', 'docs/evidence/pi-native-loader-20260922.json', '0.80.10', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
-  pending('gemini-cli', 'Gemini CLI standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
-  pending('factory', 'Factory standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
-  pending('grokbot', 'Grok Bot standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  excludedStandalone('opencode', 'OpenCode standalone skill and command loaders', 'docs/evidence/opencode-native-loader-20260922.json', '1.15.13'),
+  excludedStandalone('pi', 'Pi standalone skill loader', 'docs/evidence/pi-native-loader-20260922.json', '0.80.10'),
+  pending('gemini-cli', 'Gemini CLI native plugin-extension route', 'SPEC.md § Compatibility and lifecycle requirements (native extension semantics unverified)'),
+  excludedStandalone('factory', 'Factory standalone skill route', 'docs/hosts/factory.md'),
+  excludedStandalone('grokbot', 'Grok Bot standalone skill route', 'docs/hosts/grokbot.md'),
 ];
 
 const byId = new Map(consumerProfiles.map((entry) => [entry.id, entry]));

@@ -328,6 +328,27 @@ describe('add', () => {
     });
   });
 
+  test('refuses standalone Pi delivery without writing an install record or skill tree', async () => {
+    await withHostEnvAsync('codex', async (home) => {
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['add', '/must-not-read', '--target', 'pi', '--json'])).toBe(1);
+      } finally {
+        console.log = originalLog;
+      }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; action: string; diagnostic?: string }>;
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]?.target).toBe('pi');
+      expect(outcomes[0]?.status).toBe('unsupported');
+      expect(outcomes[0]?.action).toBe('install');
+      expect(outcomes[0]?.diagnostic).toContain('unsupported for install');
+      expect(readState()).toEqual([]);
+      expect(existsSync(join(home, '.pi', 'agent', 'skills', 'local___new-plugin'))).toBe(false);
+    });
+  });
+
   test('preserves a writer compatibility refusal in the add outcome', async () => {
     await withHostEnvAsync('codex', async () => {
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));

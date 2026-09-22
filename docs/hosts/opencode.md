@@ -1,4 +1,10 @@
-# OpenCode standalone-skill store
+# OpenCode standalone-skill store (legacy cleanup only)
+
+OpenCode standalone distribution is outside the native-plugin migration scope.
+The public `add` and `update` verbs refuse this target without writing a store
+or ledger record. Its reader and remover remain only so an older plgnz-owned
+installation can be inspected and removed safely; this page preserves the
+evidence for that cleanup path.
 
 Measured against OpenCode 1.15.13. This is a standalone projection: plgnz keeps
 the complete package privately at `~/.config/opencode/.plgnz/packages/` and
