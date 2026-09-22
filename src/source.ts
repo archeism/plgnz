@@ -1,14 +1,23 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, basename, isAbsolute } from 'node:path';
+import { join, basename, isAbsolute, resolve } from 'node:path';
 import { cacheRoot } from './paths';
 import { isGitUrl } from './exec';
+
+declare const Bun: {
+  CryptoHasher: new (algorithm: 'sha256') => {
+    update(input: string | Uint8Array): void;
+    digest(encoding: 'hex'): string;
+  };
+};
 
 export interface PluginSource {
   dir: string;
   name: string;
   version?: string;
   marketplace?: string;
+  /** Stable digest of the source directory bytes, independent of version/SHA. */
+  contentFingerprint?: string;
 }
 
 export interface ResolvedSource {
@@ -19,13 +28,14 @@ export interface ResolvedSource {
 }
 
 export function resolveSource(source: string): ResolvedSource {
-  const isGit = isGitUrl(source);
-  let targetDir = source;
+  const sourceUri = normalizeSource(source);
+  const isGit = isGitUrl(sourceUri);
+  let targetDir = sourceUri;
   let sha = 'local';
   
   if (isGit) {
-    const ls = spawnSync('git', ['ls-remote', source, 'HEAD'], { encoding: 'utf8' });
-    if (ls.status !== 0) throw new Error(`Failed to resolve git remote: ${source}`);
+    const ls = spawnSync('git', ['ls-remote', sourceUri, 'HEAD'], { encoding: 'utf8' });
+    if (ls.status !== 0) throw new Error(`Failed to resolve git remote: ${sourceUri}`);
     sha = ls.stdout.split('\t')[0] || '';
     if (!sha || sha.length !== 40) throw new Error(`Invalid sha from git ls-remote: ${sha}`);
     
@@ -34,14 +44,14 @@ export function resolveSource(source: string): ResolvedSource {
     targetDir = join(cacheDir, sha);
     
     if (!existsSync(targetDir)) {
-      const clone = spawnSync('git', ['clone', '--depth=1', source, targetDir]);
-      if (clone.status !== 0) throw new Error(`Failed to clone ${source}`);
+      const clone = spawnSync('git', ['clone', '--depth=1', sourceUri, targetDir]);
+      if (clone.status !== 0) throw new Error(`Failed to clone ${sourceUri}`);
     }
   } else {
     // An absolute source (what `add` records in state.json, and what `update`
     // feeds back) must not be re-rooted at the cwd — path.join does not reset
     // on an absolute second argument.
-    targetDir = isAbsolute(source) ? source : join(process.cwd(), source);
+    targetDir = sourceUri;
     if (!existsSync(targetDir)) throw new Error(`Local source not found: ${targetDir}`);
     const rev = spawnSync('git', ['-C', targetDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
     if (rev.status === 0) {
@@ -49,6 +59,7 @@ export function resolveSource(source: string): ResolvedSource {
       if (match) sha = match[0];
     }
   }
+  targetDir = assertSafeSourceTree(targetDir);
 
   const plugins: PluginSource[] = [];
   
@@ -58,38 +69,126 @@ export function resolveSource(source: string): ResolvedSource {
   const mp3 = join(targetDir, 'marketplace.json');
   const mpPath = existsSync(mp1) ? mp1 : existsSync(mp2) ? mp2 : existsSync(mp3) ? mp3 : null;
   
-  if (mpPath) {
-    try {
-      const data = JSON.parse(readFileSync(mpPath, 'utf8'));
-      const marketplaceName = data.name || 'local';
-      if (Array.isArray(data.plugins)) {
-        for (const p of data.plugins) {
-          if (p.source) {
-            const pDir = join(targetDir, p.source);
-            plugins.push({ dir: pDir, name: readPluginName(pDir), marketplace: marketplaceName });
-          }
-        }
+  if (mpPath !== null) {
+    const data = parseMarketplace(mpPath);
+    const marketplaceName = typeof data['name'] === 'string' ? data['name'] : 'local';
+    assertSafeIdentity(marketplaceName, 'marketplace name');
+    const entries = data['plugins'];
+    if (!Array.isArray(entries)) throw new Error(`Malformed marketplace manifest: plugins must be an array (${mpPath})`);
+    if (entries.length === 0) throw new Error(`No plugins discovered in marketplace: ${mpPath}`);
+    for (const entry of entries) {
+      if (!isRecord(entry) || typeof entry['source'] !== 'string' || entry['source'].trim() === '') {
+        throw new Error(`Malformed marketplace manifest: every plugin needs a source (${mpPath})`);
       }
-    } catch {}
+      const pDir = resolve(targetDir, entry['source']);
+      if (!isInside(targetDir, pDir)) throw new Error(`Marketplace plugin source escapes collection root: ${entry['source']}`);
+      if (!existsSync(pDir) || !statSync(pDir).isDirectory()) throw new Error(`Marketplace plugin source is not a directory: ${entry['source']}`);
+      plugins.push(withFingerprint({ dir: pDir, name: readPluginName(pDir), marketplace: marketplaceName }));
+    }
   }
   
-  if (plugins.length > 0) return { sourceUri: source, sha, isGit, plugins };
+  if (plugins.length > 0) return resolvedSource(sourceUri, sha, isGit, plugins);
 
   // 2. Root plugin
   if (isPluginDir(targetDir)) {
-    plugins.push({ dir: targetDir, name: readPluginName(targetDir) });
-    return { sourceUri: source, sha, isGit, plugins };
+    plugins.push(withFingerprint({ dir: targetDir, name: readPluginName(targetDir) }));
+    return resolvedSource(sourceUri, sha, isGit, plugins);
   }
 
   // 3. Recursive scan (1 level deep)
   for (const entry of readdirSync(targetDir)) {
     const subDir = join(targetDir, entry);
     if (statSync(subDir).isDirectory() && isPluginDir(subDir)) {
-      plugins.push({ dir: subDir, name: readPluginName(subDir) });
+      plugins.push(withFingerprint({ dir: subDir, name: readPluginName(subDir) }));
     }
   }
   
-  return { sourceUri: source, sha, isGit, plugins };
+  if (plugins.length === 0) throw new Error(`No plugins discovered in source: ${sourceUri}`);
+  return resolvedSource(sourceUri, sha, isGit, plugins);
+}
+
+function resolvedSource(sourceUri: string, sha: string, isGit: boolean, plugins: PluginSource[]): ResolvedSource {
+  const seen = new Set<string>();
+  for (const plugin of plugins) {
+    const identity = `${plugin.name}@${plugin.marketplace ?? 'local'}`;
+    if (seen.has(identity)) throw new Error(`Duplicate plugin identity discovered: ${identity}`);
+    seen.add(identity);
+  }
+  return { sourceUri, sha, isGit, plugins };
+}
+
+/** Owner/repo is the public GitHub shorthand; all local roots become absolute. */
+export function normalizeSource(source: string): string {
+  if (source.startsWith('./') || source.startsWith('../') || isAbsolute(source)) return resolve(source);
+  if (/^[^/\s]+\/[^/\s]+$/.test(source)) return `https://github.com/${source}.git`;
+  if (isGitUrl(source)) return source;
+  return resolve(source);
+}
+
+function withFingerprint(plugin: PluginSource): PluginSource {
+  return { ...plugin, contentFingerprint: fingerprintTree(plugin.dir) };
+}
+
+function fingerprintTree(root: string): string {
+  const hash = new Bun.CryptoHasher('sha256');
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir).sort()) {
+      const path = join(dir, entry);
+      const stat = statSync(path);
+      if (stat.isDirectory()) walk(path);
+      else if (stat.isFile()) {
+        hash.update(path.slice(root.length + 1));
+        hash.update(new Uint8Array([0]));
+        hash.update(readBytes(path));
+        hash.update(new Uint8Array([0]));
+      }
+    }
+  };
+  walk(root);
+  return hash.digest('hex');
+}
+
+function assertSafeSourceTree(path: string): string {
+  assertNoSymlinks(path);
+  const canonical = realpath(path);
+  assertNoSymlinks(canonical);
+  return canonical;
+}
+
+function assertNoSymlinks(path: string): void {
+  const links = spawnSync('find', [path, '-type', 'l', '-print'], { encoding: 'utf8' });
+  if (links.status !== 0) throw new Error(`Could not inspect source tree: ${path}`);
+  if (links.stdout.trim() !== '') throw new Error(`Symlink resources are not supported: ${links.stdout.trim()}`);
+}
+
+function parseMarketplace(path: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!isRecord(parsed)) throw new Error('manifest must be an object');
+    return parsed;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Malformed marketplace manifest: ${path} (${detail})`);
+  }
+}
+
+function realpath(path: string): string {
+  const result = spawnSync('realpath', [path], { encoding: 'utf8' });
+  if (result.status !== 0 || result.stdout.trim() === '') throw new Error(`Could not resolve source path: ${path}`);
+  return result.stdout.trim();
+}
+
+function isInside(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(`${root}/`);
+}
+
+function readBytes(path: string): Uint8Array {
+  const read = readFileSync as unknown as (file: string) => Uint8Array;
+  return read(path);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isPluginDir(dir: string): boolean {
@@ -101,12 +200,18 @@ function readPluginName(dir: string): string {
   const p2 = join(dir, 'plugin.json');
   let p = existsSync(p1) ? p1 : existsSync(p2) ? p2 : null;
   if (!p) {
-    return basename(dir);
+    const inferred = basename(dir);
+    assertSafeIdentity(inferred, 'plugin name');
+    return inferred;
   }
-  try {
-    const data = JSON.parse(readFileSync(p, 'utf8'));
-    return typeof data.name === 'string' ? data.name : basename(dir);
-  } catch {
-    return basename(dir);
-  }
+  let data: unknown;
+  try { data = JSON.parse(readFileSync(p, 'utf8')); }
+  catch (error) { throw new Error(`Malformed plugin manifest: ${p} (${(error as Error).message})`); }
+  if (!isRecord(data) || typeof data['name'] !== 'string') throw new Error(`Plugin manifest needs a name: ${p}`);
+  assertSafeIdentity(data['name'], 'plugin name');
+  return data['name'];
+}
+
+function assertSafeIdentity(value: string, label: string): void {
+  if (!/^[a-z0-9][a-z0-9._-]*$/iu.test(value)) throw new Error(`Unsafe ${label}: ${value}`);
 }
