@@ -1,0 +1,35 @@
+{
+  "question": "Does Claude Code 2.1.275 load an isolated namespaced command that uses the documented @${CLAUDE_PLUGIN_ROOT}/... file-reference syntax?",
+  "result": "supported",
+  "productDecision": "No command-body rewrite. Preserve native plugin command bytes.",
+  "installedDocumentation": {
+    "path": "/Users/chaz/.claude/plugins/marketplaces/claude-plugins-official/plugins/plugin-dev/skills/command-development/SKILL.md",
+    "syntax": "@${CLAUDE_PLUGIN_ROOT}/config/settings.json",
+    "negativeFinding": "The installed official command-development guidance does not use @{...} braces for Claude file references."
+  },
+  "canonicalAddySource": {
+    "path": "/Users/chaz/personal/plugins/addy/.claude/commands",
+    "relativeBraceReferences": 0,
+    "note": "No canonical Addy command contains @{./...} or @{../...}; a converter for that synthetic form has no source acceptance case."
+  },
+  "probe": {
+    "isolation": "Temporary plugin and workspace under /tmp/plgnz-claude-native-root-probe, passed only through --plugin-dir; native authentication was read without copying credentials, --no-session-persistence prevented session storage, --strict-mcp-config exposed no MCP servers, project-only settings avoided user/project customization writes, and no real Claude plugin store was mutated.",
+    "invocation": "/addy:probe",
+    "model": "claude-haiku-4-5-20251001",
+    "plugin": "addy@inline 0.1.0",
+    "commandDiscovered": true,
+    "commandBody": "Read @${CLAUDE_PLUGIN_ROOT}/probe/native-root.txt using the Read tool.",
+    "expectedSentinel": "PLGNZ_CLAUDE_NATIVE_ROOT_OK_20260922",
+    "modelCalls": 1,
+    "readToolCalls": 0,
+    "terminalResult": "PLGNZ_CLAUDE_NATIVE_ROOT_OK_20260922",
+    "expansionEvidence": "The sentinel exists only in the referenced plugin file. Claude returned it exactly without a Read tool call, showing that @${CLAUDE_PLUGIN_ROOT}/... was expanded while the slash command was prepared, before model dispatch.",
+    "transcript": "/tmp/plgnz-claude-native-root-probe/transcript-native-auth.jsonl",
+    "costUsd": 0.018454699999999997
+  },
+  "limits": [
+    "The file reference is pre-expanded by Claude's slash-command loader, so no Read tool event appears in the transcript.",
+    "An earlier isolated-HOME attempt stopped before dispatch because that temporary home had no authentication; it made zero model calls and is retained at /tmp/plgnz-claude-native-root-probe/transcript.jsonl.",
+    "This evidence proves Claude's documented @${CLAUDE_PLUGIN_ROOT}/... form and rejects the unsupported @{${CLAUDE_PLUGIN_ROOT}/...} rewrite; it does not assign source-command-relative meaning to arbitrary bare relative paths."
+  ]
+}
