@@ -75,7 +75,19 @@ default `pin` target. Rationale: `docs/pin-and-update.md`.
 
 ## Open
 
-- `omp plugin …` CLI surface not inspected in v0 (store read directly).
+- plgnz stages and validates a copied Agent-Plugin tree, writes a
+  `.plgnz-install.json` source/id/fingerprint marker, then swaps the cache
+  copy before committing registry and lockfile metadata. Unmarked, malformed,
+  or foreign user entries are refused; removal is limited to marker-owned user
+  rows. Same-version byte changes refresh the marked copy. Cleanup after a
+  durable registry/lock activation never rolls that activation back.
+- OMP 18.1.4's marketplace schema rejects `disable-model-invocation`.
+  plgnz rejects that unsupported policy before mutation rather than stripping
+  it or treating OMP's standalone loader as marketplace support. Native
+  `commands/*.md` discovery is source-evidenced, but its explicit-only
+  lifecycle and collision behavior remain unverified and are not claimed.
+- `omp plugin …` CLI is not used by this adapter; it activates the measured
+  store layout directly.
 - Whether omp will read plugin `mcp.json` (spec §7.2.1) or a native
   equivalent when plugins declare MCP is unknown — nothing on disk declares
   any yet.

@@ -7,6 +7,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { basename, dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse as parseToml } from 'smol-toml';
+import { readPluginManifest } from './source';
 
 declare const Bun: {
   YAML: { parse(input: string): unknown };
@@ -24,6 +25,7 @@ interface Command {
 
 const COMMAND_FIELDS = new Set(['description', 'argument-hint', 'argument_hint', 'disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable']);
 const UNSUPPORTED_FIELDS = new Set(['allowed-tools', 'allowed_tools', 'permissionMode', 'permission_mode', 'hooks', 'model', 'context']);
+const UNSUPPORTED_CLAUDE_COMPONENTS = new Set(['agents', 'hooks', 'mcpServers', 'outputStyles', 'lspServers']);
 
 /**
  * Copy a package into a caller-owned temporary destination and add Codex skill
@@ -43,6 +45,7 @@ export function projectPluginForCodex(sourceDir: string, destinationDir: string)
   try {
     cpSync(source, stage, { recursive: true });
     const commands = discoverCommands(source);
+    validateClaudeNativeSemantics(source, commands);
     const namespace = readPackageName(source);
     for (const command of commands) writeCommandSkill(stage, command, namespace, new Set(commands.map(item => item.name)));
     translateNativeSkillPolicies(stage);
@@ -50,6 +53,30 @@ export function projectPluginForCodex(sourceDir: string, destinationDir: string)
   } catch (error) {
     rmSync(stage, { recursive: true, force: true });
     throw error;
+  }
+}
+
+function validateClaudeNativeSemantics(source: string, commands: Command[]): void {
+  const file = join(source, '.claude-plugin', 'plugin.json');
+  if (!existsSync(file)) return;
+  const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+  if (!isRecord(parsed)) throw new Error(`Claude native plugin manifest must be an object: ${file}`);
+  for (const field of UNSUPPORTED_CLAUDE_COMPONENTS) {
+    if (parsed[field] !== undefined) throw new Error(`Claude native ${field} semantics are unsupported for Codex conversion: ${file}`);
+  }
+  if (parsed['skills'] !== undefined && parsed['skills'] !== './skills' && parsed['skills'] !== './skills/') {
+    throw new Error(`Claude native skills pointer is unsupported for Codex conversion: ${file}`);
+  }
+  if (parsed['skills'] !== undefined && (!existsSync(join(source, 'skills')) || !statSync(join(source, 'skills')).isDirectory())) {
+    throw new Error(`Claude native skills pointer cannot be preserved for Codex conversion: ${file}`);
+  }
+  if (parsed['commands'] === undefined) return;
+  const listed = Array.isArray(parsed['commands']) ? parsed['commands'] : [parsed['commands']];
+  if (!listed.every(value => typeof value === 'string')) throw new Error(`Claude native commands pointer is invalid for Codex conversion: ${file}`);
+  const preserved = new Set(commands.map(command => `./${command.source.slice(source.length + 1)}`));
+  const requested = new Set(listed as string[]);
+  if (requested.size !== preserved.size || [...requested].some(path => !preserved.has(path))) {
+    throw new Error(`Claude native commands pointer is unsupported for Codex conversion: ${file}`);
   }
 }
 
@@ -71,15 +98,11 @@ function discoverCommands(source: string): Command[] {
 }
 
 function readPackageName(source: string): string {
-  const file = manifestPath(source);
-  const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
-  if (!isRecord(parsed) || typeof parsed['name'] !== 'string' || !validSegment(parsed['name'])) throw new Error('plugin manifest name is invalid');
-  return parsed['name'];
-}
-
-function manifestPath(source: string): string {
-  for (const file of [join(source, 'plugin.json'), join(source, '.plugin', 'plugin.json')]) if (existsSync(file)) return file;
-  throw new Error('Agent Plugins manifest is required for command namespace mapping');
+  const manifest = readPluginManifest(source);
+  if (manifest === undefined) {
+    throw new Error('Plugin manifest is required for command namespace mapping');
+  }
+  return manifest.name;
 }
 
 function readCommandDirectory(directory: string, kind: 'markdown' | 'toml'): Command[] {

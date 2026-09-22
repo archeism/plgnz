@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse as parseToml } from 'smol-toml';
 import type { AddOptions, HostWriter, InstalledPlugin, PinOptions, PinOutcome } from '../host';
-import type { PluginSource, ResolvedSource } from '../source';
+import { readPluginManifest, type PluginSource, type ResolvedSource } from '../source';
 import { codexHome } from '../paths';
 import { codex, configFile, mcpCandidates } from './codex';
 import { pinPluginMcpFiles } from '../mcp-write';
@@ -205,12 +205,7 @@ function restoreConfig(path: string, snapshot: ConfigSnapshot): void {
 }
 
 function pluginVersion(dir: string): string {
-  for (const file of [join(dir, 'plugin.json'), join(dir, '.plugin', 'plugin.json')]) {
-    if (!existsSync(file)) continue;
-    const value: unknown = JSON.parse(readFileSync(file, 'utf8'));
-    if (typeof value === 'object' && value !== null && typeof (value as Record<string, unknown>)['version'] === 'string') return (value as Record<string, string>)['version'] ?? 'local';
-  }
-  return 'local';
+  return readPluginManifest(dir)?.version ?? 'local';
 }
 
 function validVersionSegment(value: string): boolean {
@@ -232,7 +227,7 @@ function readOwnership(dir: string): { source: string; pluginId: string; fingerp
 }
 
 function validateStage(stage: string): void {
-  if (!existsSync(join(stage, 'plugin.json')) && !existsSync(join(stage, '.plugin', 'plugin.json'))) throw new Error('Codex stage has no Agent Plugins manifest');
+  if (readPluginManifest(stage) === undefined) throw new Error('Codex stage has no Agent Plugins manifest');
   const skills = join(stage, 'skills');
   if (existsSync(skills) && !statSync(skills).isDirectory()) throw new Error('Codex stage skills path is not a directory');
 }
@@ -252,11 +247,11 @@ function validateCachedIdentity(target: string, expectedName: string, expectedVe
 /** Codex's native loader requires its own manifest path; project only safe, relevant fields. */
 function ensureNativeManifest(stage: string, fallbackName: string, fallbackVersion: string): void {
   const native = join(stage, '.codex-plugin', 'plugin.json');
-  const sourcePath = existsSync(join(stage, 'plugin.json')) ? join(stage, 'plugin.json') : join(stage, '.plugin', 'plugin.json');
-  const root = JSON.parse(readFileSync(sourcePath, 'utf8')) as Record<string, unknown>;
-  const name = typeof root['name'] === 'string' ? root['name'] : fallbackName;
-  const version = typeof root['version'] === 'string' ? root['version'] : fallbackVersion;
-  const description = typeof root['description'] === 'string' ? root['description'] : `Plugin ${name}`;
+  const sourceManifest = readPluginManifest(stage);
+  if (sourceManifest === undefined) throw new Error('Codex stage has no Agent Plugins manifest');
+  const name = sourceManifest.name ?? fallbackName;
+  const version = sourceManifest.version ?? fallbackVersion;
+  const description = sourceManifest.description ?? `Plugin ${name}`;
   let overlay: Record<string, unknown> = {};
   if (existsSync(native)) {
     const value: unknown = JSON.parse(readFileSync(native, 'utf8'));

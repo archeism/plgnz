@@ -31,6 +31,42 @@ describe('resolveSource', () => {
     expect(second.plugins[0]?.contentFingerprint === first.plugins[0]?.contentFingerprint).toBe(false);
   });
 
+  test('uses a native-only Claude marketplace manifest for plugin identity and version', () => {
+    const root = mkdtempSync(join(tmpdir(), 'plgnz-native-source-'));
+    mkdirSync(join(root, '.claude-plugin'));
+    writeFileSync(join(root, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+      name: 'superpowers-dev', plugins: [{ source: './' }],
+    }));
+    writeFileSync(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
+      name: 'superpowers', version: '6.4.1', description: 'Native source fixture', nativeOnly: true,
+    }));
+    const plugin = resolveSource(root).plugins[0];
+    expect(plugin?.name).toBe('superpowers');
+    expect(plugin?.version).toBe('6.4.1');
+    expect(plugin?.marketplace).toBe('superpowers-dev');
+  });
+
+  test('rejects conflicting canonical and native manifest identities', () => {
+    for (const native of [
+      { name: 'other', version: '1.0.0' },
+      { name: 'fixture', version: '2.0.0' },
+    ]) {
+      const root = mkdtempSync(join(tmpdir(), 'plgnz-manifest-conflict-'));
+      plugin(root, 'fixture');
+      mkdirSync(join(root, '.claude-plugin'));
+      writeFileSync(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify(native));
+      expectThrow(() => resolveSource(root), 'Conflicting plugin manifest identity');
+    }
+  });
+
+  test('rejects a malformed native manifest even when a canonical manifest is present', () => {
+    const root = mkdtempSync(join(tmpdir(), 'plgnz-manifest-malformed-'));
+    plugin(root, 'fixture');
+    mkdirSync(join(root, '.claude-plugin'));
+    writeFileSync(join(root, '.claude-plugin', 'plugin.json'), '{not json');
+    expectThrow(() => resolveSource(root), 'Malformed plugin manifest');
+  });
+
   test('rejects a collection that discovers no plugins', () => {
     const empty = mkdtempSync(join(tmpdir(), 'plgnz-empty-'));
     let error: Error | undefined;

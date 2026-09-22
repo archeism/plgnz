@@ -14,6 +14,13 @@ export interface PluginSource {
   contentFingerprint?: string;
 }
 
+/** Identity fields shared by canonical Agent Plugins and supported native inputs. */
+export interface PluginManifest {
+  name: string;
+  version?: string;
+  description?: string;
+}
+
 export interface ResolvedSource {
   sourceUri: string;
   sha: string;
@@ -77,7 +84,7 @@ export function resolveSource(source: string): ResolvedSource {
       const pDir = resolve(targetDir, entry['source']);
       if (!isInside(targetDir, pDir)) throw new Error(`Marketplace plugin source escapes collection root: ${entry['source']}`);
       if (!existsSync(pDir) || !statSync(pDir).isDirectory()) throw new Error(`Marketplace plugin source is not a directory: ${entry['source']}`);
-      plugins.push(withFingerprint({ dir: pDir, name: readPluginName(pDir), marketplace: marketplaceName }));
+      plugins.push(pluginFromDir(pDir, marketplaceName));
     }
   }
   
@@ -85,7 +92,7 @@ export function resolveSource(source: string): ResolvedSource {
 
   // 2. Root plugin
   if (isPluginDir(targetDir)) {
-    plugins.push(withFingerprint({ dir: targetDir, name: readPluginName(targetDir) }));
+    plugins.push(pluginFromDir(targetDir));
     return resolvedSource(sourceUri, sha, isGit, plugins);
   }
 
@@ -93,7 +100,7 @@ export function resolveSource(source: string): ResolvedSource {
   for (const entry of readdirSync(targetDir)) {
     const subDir = join(targetDir, entry);
     if (statSync(subDir).isDirectory() && isPluginDir(subDir)) {
-      plugins.push(withFingerprint({ dir: subDir, name: readPluginName(subDir) }));
+      plugins.push(pluginFromDir(subDir));
     }
   }
   
@@ -121,6 +128,12 @@ export function normalizeSource(source: string): string {
 
 function withFingerprint(plugin: PluginSource): PluginSource {
   return { ...plugin, contentFingerprint: fingerprintTree(plugin.dir) };
+}
+
+function pluginFromDir(dir: string, marketplace?: string): PluginSource {
+  const manifest = readPluginManifest(dir);
+  const name = manifest?.name ?? inferredPluginName(dir);
+  return withFingerprint({ dir, name, ...(manifest?.version === undefined ? {} : { version: manifest.version }), ...(marketplace === undefined ? {} : { marketplace }) });
 }
 
 function assertSafeSourceTree(path: string): string {
@@ -162,24 +175,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isPluginDir(dir: string): boolean {
-  return existsSync(join(dir, '.plugin', 'plugin.json')) || existsSync(join(dir, 'plugin.json')) || existsSync(join(dir, '.mcp.json')) || existsSync(join(dir, 'mcp.json'));
+  return manifestPaths(dir).some(existsSync) || existsSync(join(dir, '.mcp.json')) || existsSync(join(dir, 'mcp.json'));
 }
 
-function readPluginName(dir: string): string {
-  const p1 = join(dir, '.plugin', 'plugin.json');
-  const p2 = join(dir, 'plugin.json');
-  let p = existsSync(p1) ? p1 : existsSync(p2) ? p2 : null;
-  if (!p) {
-    const inferred = basename(dir);
-    assertSafeIdentity(inferred, 'plugin name');
-    return inferred;
+/**
+ * Canonical manifests take precedence. `.claude-plugin/plugin.json` is a
+ * supported source-only fallback; it is never rewritten into a source tree.
+ */
+export function readPluginManifest(dir: string): PluginManifest | undefined {
+  let selected: PluginManifest | undefined;
+  for (const path of manifestPaths(dir)) {
+    if (!existsSync(path)) continue;
+    const current = parsePluginManifest(path);
+    if (selected === undefined) {
+      selected = current;
+      continue;
+    }
+    if (current.name !== selected.name || (current.version !== undefined && selected.version !== undefined && current.version !== selected.version)) {
+      throw new Error(`Conflicting plugin manifest identity: ${path}`);
+    }
   }
+  return selected;
+}
+
+function manifestPaths(dir: string): string[] {
+  return [join(dir, 'plugin.json'), join(dir, '.plugin', 'plugin.json'), join(dir, '.claude-plugin', 'plugin.json')];
+}
+
+function parsePluginManifest(path: string): PluginManifest {
   let data: unknown;
-  try { data = JSON.parse(readFileSync(p, 'utf8')); }
-  catch (error) { throw new Error(`Malformed plugin manifest: ${p} (${(error as Error).message})`); }
-  if (!isRecord(data) || typeof data['name'] !== 'string') throw new Error(`Plugin manifest needs a name: ${p}`);
+  try { data = JSON.parse(readFileSync(path, 'utf8')); }
+  catch (error) { throw new Error(`Malformed plugin manifest: ${path} (${(error as Error).message})`); }
+  if (!isRecord(data) || typeof data['name'] !== 'string') throw new Error(`Plugin manifest needs a name: ${path}`);
   assertSafeIdentity(data['name'], 'plugin name');
-  return data['name'];
+  if (data['version'] !== undefined && (typeof data['version'] !== 'string' || data['version'].trim() === '')) throw new Error(`Plugin manifest version is invalid: ${path}`);
+  if (data['description'] !== undefined && typeof data['description'] !== 'string') throw new Error(`Plugin manifest description is invalid: ${path}`);
+  return { name: data['name'], ...(typeof data['version'] === 'string' ? { version: data['version'] } : {}), ...(typeof data['description'] === 'string' ? { description: data['description'] } : {}) };
+}
+
+function inferredPluginName(dir: string): string {
+  const inferred = basename(dir);
+  assertSafeIdentity(inferred, 'plugin name');
+  return inferred;
 }
 
 function assertSafeIdentity(value: string, label: string): void {

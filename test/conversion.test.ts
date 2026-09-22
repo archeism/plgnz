@@ -109,6 +109,39 @@ describe('projectPluginForCodex', () => {
     projectPluginForCodex(source, dest);
     expect(JSON.parse(readFileSync(join(dest, '.plugin/plugin.json'), 'utf8')).version).toBe('1.2.3');
   });
+
+  test('projects a native-only Claude manifest without materializing a replacement manifest', () => {
+    const source = mkdtempSync(join(tmpdir(), 'plgnz-conversion-native-'));
+    const nativeManifest = '{"name":"superpowers","version":"6.4.1","description":"Native source","nativeOnly":true,"commands":["./.claude/commands/run.md"],"skills":"./skills/"}';
+    writeFiles(source, {
+      '.claude-plugin/plugin.json': nativeManifest,
+      '.claude/commands/run.md': '---\ndescription: Run\n---\nUse /run.\n',
+      'skills/native/SKILL.md': '---\nname: native\ndescription: Native skill\n---\nbody\n',
+    });
+    const dest = destination();
+    projectPluginForCodex(source, dest);
+    expect(readFileSync(join(dest, 'skills/run/SKILL.md'), 'utf8')).toContain('$superpowers:run');
+    expect(readFileSync(join(dest, 'skills/native/SKILL.md'), 'utf8')).toContain('Native skill');
+    expect(existsSync(join(dest, 'plugin.json'))).toBe(false);
+    expect(existsSync(join(dest, '.plugin/plugin.json'))).toBe(false);
+    expect(readFileSync(join(source, '.claude-plugin/plugin.json'), 'utf8')).toBe(nativeManifest);
+    expect(readFileSync(join(dest, '.claude-plugin/plugin.json'), 'utf8')).toBe(nativeManifest);
+  });
+
+  test('rejects Claude-native behavior that Codex conversion cannot preserve', () => {
+    for (const manifest of [
+      { name: 'fixture', commands: ['./custom/run.md'] },
+      { name: 'fixture', hooks: './hooks.json' },
+    ]) {
+      const source = mkdtempSync(join(tmpdir(), 'plgnz-conversion-native-refusal-'));
+      writeFiles(source, {
+        '.claude-plugin/plugin.json': JSON.stringify(manifest),
+        'custom/run.md': '---\ndescription: Run\n---\nbody\n',
+        'hooks.json': '{}',
+      });
+      expectThrow(() => projectPluginForCodex(source, destination()), 'unsupported for Codex conversion');
+    }
+  });
 });
 
 function expectThrow(fn: () => void, message: string): void {

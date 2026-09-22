@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { codexWriter } from '../src/hosts/codex-writer';
 import { codex } from '../src/hosts/codex';
 import { withHostEnvAsync, writeFiles } from './util';
-import type { PluginSource, ResolvedSource } from '../src/source';
+import { resolveSource, type PluginSource, type ResolvedSource } from '../src/source';
 
 function source(files: Record<string, string>): { plugin: PluginSource; resolved: ResolvedSource } {
   const dir = mkdtempSync(join(tmpdir(), 'plgnz-codex-lifecycle-'));
@@ -32,6 +32,20 @@ describe('codex lifecycle', () => {
       await codexWriter.add(first.plugin, first.resolved);
       expect(readFileSync(join(target, 'resources/value.txt'), 'utf8')).toBe('two\n');
       expect(codex.listInstalled().find(plugin => plugin.name === 'demo-plugin')?.version).toBe('1.2.0');
+    });
+  });
+
+  test('validates a native-only Claude marketplace source under its normalized Codex identity', async () => {
+    await withHostEnvAsync('codex', async home => {
+      const dir = mkdtempSync(join(tmpdir(), 'plgnz-codex-native-source-'));
+      writeFiles(dir, {
+        '.claude-plugin/marketplace.json': '{"name":"superpowers-dev","plugins":[{"source":"./"}]}',
+        '.claude-plugin/plugin.json': '{"name":"superpowers","version":"6.4.1","description":"Native source"}',
+      });
+      const resolved = resolveSource(dir);
+      const plugin = resolved.plugins[0]!;
+      await codexWriter.add(plugin, resolved, { dryRun: true });
+      expect(existsSync(join(home, '.codex/plugins/cache/superpowers-dev/superpowers/6.4.1'))).toBe(false);
     });
   });
 
