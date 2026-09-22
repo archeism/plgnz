@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import type { AddOptions, HostWriter, InstalledPlugin, PinOptions, PinOutcome } from '../host';
 import type { PluginSource, ResolvedSource } from '../source';
 import { dcode, dcodeEnablementFile, dcodeRegistryFile, dcodeRoot, dcodeStateDir } from './dcode';
+import { requireCompatible } from '../compatibility';
+import { findConsumerProfile } from '../consumer-profiles';
+
+declare const Bun: any;
 
 const MARKER = '.plgnz-install.json';
 type Ownership = { source: string; pluginId: string; fingerprint: string };
@@ -65,17 +69,24 @@ export const dcodeWriter: HostWriter = {
 
 function stagePlugin(source: string, stage: string, name: string): void {
   assertNoSymlinks(source); cpSync(source, stage, { recursive: true }); assertNoSymlinks(stage);
-  const manifest = [join(stage, 'plugin.json'), join(stage, '.plugin', 'plugin.json'), join(stage, '.claude-plugin', 'plugin.json'), join(stage, '.codex-plugin', 'plugin.json')].find(existsSync);
+  const manifest = [join(stage, 'plugin.json'), join(stage, '.claude-plugin', 'plugin.json'), join(stage, '.codex-plugin', 'plugin.json')].find(existsSync);
   if (!manifest) throw new Error('dcode stage has no supported plugin manifest');
   const parsed = JSON.parse(readFileSync(manifest, 'utf8')) as Doc;
   if (parsed.name !== name) throw new Error(`dcode manifest identity does not match ${name}`);
-  if (existsSync(join(stage, 'commands')) || existsSync(join(stage, '.claude', 'commands')) || existsSync(join(stage, 'agents')) || existsSync(join(stage, '.claude', 'agents'))) throw new Error('dcode plugin commands/agents are unsupported; refusing to activate');
+  if (existsSync(join(stage, 'commands')) || existsSync(join(stage, '.claude', 'commands'))) requireDcodeCapability('commandProjection');
+  if (existsSync(join(stage, 'agents')) || existsSync(join(stage, '.claude', 'agents'))) throw new Error('dcode plugin agents are unsupported; refusing to activate');
   for (const skill of skillFiles(stage)) {
-    const raw = readFileSync(skill, 'utf8');
-    if (/^\s*(?:disable-model-invocation|user-invocable)\s*:/m.test(raw)) throw new Error('dcode user-only skill invocation is unverified; refusing to activate');
+    const frontmatter = openingFrontmatter(readFileSync(skill, 'utf8'), skill);
+    if (frontmatter !== undefined && ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable'].some(key => Object.hasOwn(frontmatter, key))) requireDcodeCapability('userOnlySkills');
   }
 }
+function requireDcodeCapability(capability: 'commandProjection' | 'userOnlySkills'): void {
+  const profile = findConsumerProfile('dcode');
+  if (profile === undefined) throw new Error('dcode consumer profile is missing');
+  requireCompatible(profile, capability);
+}
 function skillFiles(root: string): string[] { const out: string[] = []; const walk = (dir: string): void => { for (const entry of readdirSync(dir)) { const path = join(dir, entry); const st = lstatSync(path); if (st.isDirectory()) walk(path); else if (entry === 'SKILL.md') out.push(path); } }; walk(root); return out; }
+function openingFrontmatter(raw: string, path: string): Record<string, unknown> | undefined { const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(raw); if (match === null) return undefined; let parsed: unknown; try { parsed = Bun.YAML.parse(match[1] ?? ''); } catch { throw new Error(`dcode skill frontmatter has invalid YAML: ${path}`); } if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error(`dcode skill frontmatter must be an object: ${path}`); return parsed as Record<string, unknown>; }
 function readDoc(file: string, fallback: Doc, label: string): Doc { if (!existsSync(file)) return fallback; try { const value: unknown = JSON.parse(readFileSync(file, 'utf8')); if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('not an object'); return value as Doc; } catch (error) { throw new Error(`invalid dcode ${label}: ${file} (${(error as Error).message})`); } }
 function readRegistry(file: string): Doc { const registry = readDoc(file, { version: 2, plugins: {} }, 'registry'); if (registry.version !== 1 && registry.version !== 2) throw new Error(`invalid dcode registry version: ${file}`); const plugins = object(registry.plugins, 'registry plugins'); for (const [id, value] of Object.entries(plugins)) { if (!id || !Array.isArray(value) || value.length === 0) throw new Error(`invalid dcode registry record: ${id}`); for (const row of value) { if (typeof row !== 'object' || row === null || Array.isArray(row) || (typeof (row as Doc).installPath !== 'string' && typeof (row as Doc).install_path !== 'string')) throw new Error(`invalid dcode registry record: ${id}`); } } return registry; }
 function readEnablement(file: string): Doc { const enablement = readDoc(file, { version: 1, enabledPlugins: {} }, 'enablement'); if (enablement.version !== undefined && (!Number.isInteger(enablement.version) || (enablement.version as number) > 1)) throw new Error(`invalid dcode enablement version: ${file}`); boolObject(enablement.enabledPlugins, 'enabledPlugins'); return enablement; }

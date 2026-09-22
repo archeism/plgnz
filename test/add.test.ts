@@ -174,6 +174,21 @@ describe('add', () => {
     });
   });
 
+  test('reports an explicitly requested but absent dcode target without creating a native store', async () => {
+    await withHostEnvAsync('codex', async (home) => {
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
+      initGitRepo(sourceDir, pluginsMap);
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try { expect(await main(['add', sourceDir, '--target', 'dcode', '--json'])).toBe(2); }
+      finally { console.log = originalLog; }
+      const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; diagnostic?: string }>;
+      expect(outcomes).toHaveLength(1); expect(outcomes[0]?.target).toBe('dcode'); expect(outcomes[0]?.status).toBe('failed'); expect(outcomes[0]?.diagnostic).toContain("requested target 'dcode' is not present on this machine");
+      expect(readState()).toEqual([]); expect(existsSync(join(home, '.deepagents'))).toBe(false);
+    });
+  });
+
   test('rejects a name outside the frozen target inventory before source or native writes', async () => {
     await withHostEnvAsync('codex', async () => {
       const before = codex.listInstalled().map((plugin) => plugin.id);

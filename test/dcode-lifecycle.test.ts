@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dcode } from '../src/hosts/dcode';
 import { dcodeWriter } from '../src/hosts/dcode-writer';
+import { CompatibilityError } from '../src/compatibility';
 import type { PluginSource, ResolvedSource } from '../src/source';
 import { writeFiles } from './util';
 
@@ -40,13 +41,37 @@ describe('dcode lifecycle', () => {
       expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(`---\nname: a\ndescription: fixture\n---\n${raw}`);
     });
   });
+  test('retains native MCP and hook declarations without translation', async () => {
+    await isolated(async root => {
+      const item = incoming(); writeFiles(item.plugin.dir, { '.mcp.json': '{"mcpServers":{"fixture":{"command":"fixture"}}}\n', 'hooks/hooks.json': '{"hooks":{}}\n' });
+      await dcodeWriter.add(item.plugin, item.resolved);
+      expect(readFileSync(join(copy(root), '.mcp.json'), 'utf8')).toBe('{"mcpServers":{"fixture":{"command":"fixture"}}}\n'); expect(readFileSync(join(copy(root), 'hooks/hooks.json'), 'utf8')).toBe('{"hooks":{}}\n');
+    });
+  });
+  test('refuses a .plugin-only manifest that the native loader does not read', async () => {
+    await isolated(async root => {
+      const item = incoming(); rmSync(join(item.plugin.dir, 'plugin.json')); writeFiles(item.plugin.dir, { '.plugin/plugin.json': '{"name":"addy","version":"0.1.0"}\n' });
+      expect((await failed(() => dcodeWriter.add(item.plugin, item.resolved))).message).toContain('no supported plugin manifest'); expect(existsSync(copy(root))).toBe(false);
+    });
+  });
   test('unsupported command and user-only semantics preserve the active copy', async () => {
     await isolated(async root => {
       const first = incoming('first\n'); await dcodeWriter.add(first.plugin, first.resolved); const before = readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8');
       const command = incoming('second\n'); command.resolved.sourceUri = first.resolved.sourceUri; writeFiles(command.plugin.dir, { 'commands/x.md': 'nope\n' });
-      expect((await failed(() => dcodeWriter.add(command.plugin, command.resolved))).message).toContain('commands/agents'); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
-      const gated = incoming('---\nname: a\ndescription: fixture\ndisable-model-invocation: true\n---\nbody\n'); gated.resolved.sourceUri = first.resolved.sourceUri;
-      expect((await failed(() => dcodeWriter.add(gated.plugin, gated.resolved))).message).toContain('user-only'); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
+      const commandFailure = await failed(() => dcodeWriter.add(command.plugin, command.resolved)); expect(commandFailure instanceof CompatibilityError).toBe(true); expect(commandFailure.message).toContain("target 'dcode' is unsupported for commandProjection"); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
+      const gated = incoming(); gated.resolved.sourceUri = first.resolved.sourceUri; writeFiles(gated.plugin.dir, { 'skills/a/SKILL.md': '---\nname: a\ndescription: fixture\ndisable-model-invocation: true\n---\nbody\n' });
+      const gatedFailure = await failed(() => dcodeWriter.add(gated.plugin, gated.resolved)); expect(gatedFailure instanceof CompatibilityError).toBe(true); expect(gatedFailure.message).toContain("target 'dcode' is unsupported for userOnlySkills"); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
+    });
+  });
+  test('reads all user-only aliases only from opening YAML frontmatter', async () => {
+    await isolated(async root => {
+      const first = incoming('first\n'); await dcodeWriter.add(first.plugin, first.resolved); const before = readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8');
+      for (const key of ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable']) {
+        const gated = incoming(); gated.resolved.sourceUri = first.resolved.sourceUri; writeFiles(gated.plugin.dir, { 'skills/a/SKILL.md': `---\nname: a\ndescription: fixture\n"${key}": true\n---\nbody\n` });
+        const failure = await failed(() => dcodeWriter.add(gated.plugin, gated.resolved)); expect(failure instanceof CompatibilityError).toBe(true); expect(failure.message).toContain("target 'dcode' is unsupported for userOnlySkills"); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
+      }
+      const bodyOnly = incoming('---\nname: a\ndescription: fixture\n---\nThe text disable-model-invocation: true is body text.\n'); bodyOnly.resolved.sourceUri = first.resolved.sourceUri;
+      expect(await dcodeWriter.add(bodyOnly.plugin, bodyOnly.resolved, { dryRun: true })).toBeUndefined(); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
     });
   });
   test('dry-run preflights identically and writes no active state', async () => {

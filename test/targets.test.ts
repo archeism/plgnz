@@ -70,6 +70,8 @@ describe('targets', () => {
       expect(profiles.find((profile) => profile.id === 'grokbot')?.capabilities.install).toBe('unverified');
       expect(profiles.find((profile) => profile.id === 'cursor')?.evidence).toBe('docs/hosts/cursor.md');
       expect(profiles.find((profile) => profile.id === 'codex')?.capabilities.commandProjection).toBe('supported');
+      const dcode = profiles.find((profile) => profile.id === 'dcode')?.capabilities;
+      expect(dcode?.install).toBe('supported'); expect(dcode?.update).toBe('supported'); expect(dcode?.commandProjection).toBe('unsupported'); expect(dcode?.userOnlySkills).toBe('unsupported');
     });
   });
 

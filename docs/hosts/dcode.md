@@ -18,8 +18,13 @@ same-version content change therefore refreshes the cache. Metadata failures
 roll the swap back; cleanup after metadata commit does not undo the active
 copy. Removal only handles marker-owned records.
 
-dcode has evidence for ordinary plugin skills only. Plugin commands, agents,
-and user-only skill invocation are unproven (commands are recorded as
-unsupported), so the writer rejects those inputs before activation. No loader
-subprocess is run by this adapter; the native state contract still needs a
-separate isolated loader conformance probe.
+dcode has native-loader evidence for ordinary plugin skills in
+`docs/evidence/dcode-native-loader-20260922.json`. Plugin commands and agents
+are unsupported, and user-only skill invocation is not retained by the loader,
+so the writer rejects those inputs before activation. Hooks and MCP declarations
+remain in the staged package unchanged; the writer does not translate or drop
+them, and the native inventory accepts root `mcpServers` / `hooks`, `.mcp.json`,
+and `hooks/hooks.json`. Its manifest reader accepts only `plugin.json`,
+`.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`; a
+`.plugin/plugin.json`-only package is rejected instead of silently losing its
+manifest semantics.

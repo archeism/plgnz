@@ -1,0 +1,93 @@
+{
+  "date": "2026-09-22",
+  "scope": "Isolated native-loader verification only; no model, cloud request, user home, marketplace, or shared registry was modified.",
+  "host": "macdeMac-mini.local via ssh m1",
+  "package": {
+    "name": "deepagents-code",
+    "version": "0.1.71",
+    "sdk_version": "0.7.15",
+    "launcher": "/Users/mac/.local/bin/dcode",
+    "python": "/Users/mac/.local/share/uv/tools/deepagents-code/bin/python",
+    "store_revision": {
+      "installed_plugins": 2,
+      "plugin_state": 1
+    },
+    "source_revision": "unavailable from the installed distribution"
+  },
+  "adapter_revision": "df3795fa95011b816a462a8e3266da24eae42e9a",
+  "acceptance": {
+    "question": "Does the installed Dcode native loader consume an adapter-generated ordinary Agent Plugin skill from an isolated DEEPAGENTS_HOME, preserve its resource paths, and expose unsupported semantics honestly?",
+    "ordinary_skill": true,
+    "resources_retained": true,
+    "commands_refused": true,
+    "manual_only_refused": true
+  },
+  "adapter_generated_package_probe": {
+    "fixture": "dcodeWriter.add generated fixture@personal at plugins/cache/personal/fixture/0.1.0, then the generated cache was copied into a separate Mini temporary DEEPAGENTS_HOME and registered there.",
+    "native_loader": "deepagents_code.plugins.discover_plugins plus deepagents_code.plugins.adapters.skills_middleware.load_namespaced_skills",
+    "result": {
+      "plugin_id": "fixture@personal",
+      "inventory_skills": [
+        "plugins/cache/personal/fixture/0.1.0/skills"
+      ],
+      "loaded_skill": "fixture@personal:nested:ordinary",
+      "loaded_skill_path": "plugins/cache/personal/fixture/0.1.0/skills/nested/ordinary/SKILL.md",
+      "nested_resource": "skills/nested/ordinary/references/value.txt",
+      "plugin_root_resource": "resources/plugin.txt",
+      "plugin_root_resource_contents": "plugin-resource",
+      "unsupported_components": [],
+      "elapsed_ms": 1461.389
+    }
+  },
+  "unsupported_semantics_probe": {
+    "fixture": "Native registry fixture containing commands/x.md and skills/manual/SKILL.md with disable-model-invocation: true.",
+    "native_inventory_unsupported": [
+      "commands"
+    ],
+    "native_loaded_manual_metadata": {
+      "name": "fixture@personal:manual",
+      "metadata": {}
+    },
+    "interpretation": "The installed loader identifies commands as unsupported and its loaded skill metadata contains no manual-only policy. The adapter therefore rejects commands/agents and disable-model-invocation or user-invocable inputs before activation; test/dcode-lifecycle.test.ts verifies that each rejection retains the active copy."
+  },
+  "native_manifest_components_probe": {
+    "fixture": "Isolated registered package with root plugin.json inline mcpServers and hooks, .mcp.json, hooks/hooks.json, and a competing .plugin/plugin.json.",
+    "result": {
+      "plugin_name": "fixture",
+      "mcp_files": [
+        ".mcp.json"
+      ],
+      "hook_files": [
+        "hooks/hooks.json"
+      ],
+      "inline_mcp": {
+        "inline": {
+          "command": "echo"
+        }
+      },
+      "inline_hooks": {
+        "hooks": {
+          "PreToolUse": []
+        }
+      },
+      "warnings": []
+    },
+    "manifest_boundary": "The installed manifest reader recognizes plugin.json, .claude-plugin/plugin.json, and .codex-plugin/plugin.json only. It ignores .plugin/plugin.json, so dcodeWriter rejects a .plugin-only package rather than claim preserved semantics."
+  },
+  "cli_boundary": {
+    "command": "dcode skills list --json",
+    "result": "Does not list installed plugin skills. This is a user-skill management view; runtime plugin discovery and PluginSkillsMiddleware are the verified loader surfaces."
+  },
+  "commands": [
+    "ssh m1 'dcode --version; dcode --help; dcode skills --help'",
+    "OPEN_PLUGIN_DCODE_ROOT=<local-temp> bun -e '<fixture creation>; await dcodeWriter.add(...)'",
+    "tar generated native root to ssh m1 temporary directory; rewrite only the temporary installed-plugin paths; DEEPAGENTS_HOME=<mini-temp> <installed-python> -c '<discover_plugins; load_namespaced_skills>'",
+    "DEEPAGENTS_HOME=<mini-temp> <installed-python> -c '<discover gated skill and commands inventory>'",
+    "bun test test/dcode-lifecycle.test.ts"
+  ],
+  "validation": {
+    "command": "bun test test/dcode-lifecycle.test.ts",
+    "result": "9 pass, 0 fail, 30 expectations, 40.00 ms"
+  },
+  "decision": "Native loader evidence satisfies the dcode adapter's ordinary-skill boundary. The active Dcode reader/writer registry and profile may support install/update while refusing command projection and user-only skills."
+}
