@@ -17,5 +17,6 @@ import { cursor } from './cursor';
 import { omp } from './omp';
 import { pi } from './pi';
 import { dcode } from './dcode';
+import { opencode } from './opencode';
 
-export const hosts: HostReader[] = [claudeCode, codex, kimi, cursor, omp, pi, dcode];
+export const hosts: HostReader[] = [claudeCode, codex, kimi, cursor, omp, pi, dcode, opencode];

@@ -1,0 +1,147 @@
+{
+  "scenario": "Isolated public CLI install, unchanged re-add, healthy doctor, active command tamper detected, repair, healthy doctor, removal",
+  "model_calls": 0,
+  "calls": [
+    {
+      "args": [
+        "add",
+        "<isolated-home-parent>/source",
+        "--target",
+        "opencode"
+      ],
+      "exit": 0,
+      "result": [
+        {
+          "plugin": "demo",
+          "target": "opencode",
+          "status": "installed",
+          "action": "install",
+          "dryRun": false,
+          "nativeId": "demo"
+        }
+      ]
+    },
+    {
+      "args": [
+        "add",
+        "<isolated-home-parent>/source",
+        "--target",
+        "opencode"
+      ],
+      "exit": 0,
+      "result": [
+        {
+          "plugin": "demo",
+          "target": "opencode",
+          "status": "unchanged",
+          "action": "install",
+          "dryRun": false,
+          "nativeId": "demo"
+        }
+      ]
+    },
+    {
+      "args": [
+        "doctor",
+        "--target",
+        "opencode"
+      ],
+      "exit": 0,
+      "result": [
+        {
+          "host": "opencode",
+          "pluginId": "demo@local",
+          "check": "content",
+          "mark": "\u2713",
+          "message": "install 'demo@local' source and native content match their recorded byte proofs"
+        },
+        {
+          "host": "opencode",
+          "mark": "!",
+          "message": "install 'demo@local' staleness unknown \u2014 cannot determine head of <isolated-home-parent>/source"
+        }
+      ]
+    },
+    {
+      "args": [
+        "doctor",
+        "--target",
+        "opencode"
+      ],
+      "exit": 1,
+      "result": [
+        {
+          "host": "opencode",
+          "pluginId": "demo@local",
+          "check": "content",
+          "mark": "\u2717",
+          "message": "install 'demo@local' native content changed after activation"
+        },
+        {
+          "host": "opencode",
+          "mark": "!",
+          "message": "install 'demo@local' staleness unknown \u2014 cannot determine head of <isolated-home-parent>/source"
+        }
+      ]
+    },
+    {
+      "args": [
+        "add",
+        "<isolated-home-parent>/source",
+        "--target",
+        "opencode"
+      ],
+      "exit": 0,
+      "result": [
+        {
+          "plugin": "demo",
+          "target": "opencode",
+          "status": "installed",
+          "action": "install",
+          "dryRun": false,
+          "nativeId": "demo"
+        }
+      ]
+    },
+    {
+      "args": [
+        "doctor",
+        "--target",
+        "opencode"
+      ],
+      "exit": 0,
+      "result": [
+        {
+          "host": "opencode",
+          "pluginId": "demo@local",
+          "check": "content",
+          "mark": "\u2713",
+          "message": "install 'demo@local' source and native content match their recorded byte proofs"
+        },
+        {
+          "host": "opencode",
+          "mark": "!",
+          "message": "install 'demo@local' staleness unknown \u2014 cannot determine head of <isolated-home-parent>/source"
+        }
+      ]
+    },
+    {
+      "args": [
+        "remove",
+        "demo@local",
+        "--target",
+        "opencode"
+      ],
+      "exit": 0,
+      "result": [
+        {
+          "plugin": "demo@local",
+          "target": "opencode",
+          "status": "installed",
+          "action": "remove",
+          "dryRun": false
+        }
+      ]
+    }
+  ]
+}

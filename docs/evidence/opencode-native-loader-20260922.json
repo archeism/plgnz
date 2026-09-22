@@ -1,0 +1,61 @@
+{
+  "date": "2026-09-22",
+  "host": {
+    "binary": "/Users/chaz/.opencode/bin/opencode",
+    "version": "1.15.13",
+    "sourceCheckout": "/Users/chaz/workspace/learning/agents/opencode",
+    "sourceCommit": "4d68d30b48a99379b2baaf597dbad576707ea36d"
+  },
+  "surface": "isolated temporary HOME and XDG directories; direct plgnz OpenCode writer projection followed by `opencode debug skill` and `opencode serve` GET /command; no real home, network, or model request",
+  "fixture": {
+    "automaticSkill": "skills/ordinary/SKILL.md with ../../resources/persona.md",
+    "manualSkill": "skills/manual/SKILL.md with disable-model-invocation: true, a YAML comment, multiline description, ../ordinary/SKILL.md, and $ARGUMENTS",
+    "sourceCommand": ".claude/commands/run.md with references/nested.txt, $1, and $ARGUMENTS"
+  },
+  "nativeCatalog": {
+    "exit": 0,
+    "names": ["customize-opencode", "ordinary"],
+    "ordinary": {
+      "description": "ordinary proof",
+      "locationSuffix": ".config/opencode/skills/plgnz-m11-74x65x73x74-p14-70x72x6fx6fx66/skills/ordinary/SKILL.md",
+      "content": "Read ../../resources/persona.md\\n"
+    },
+    "manualCatalogued": false,
+    "stderr": "one-time isolated SQLite migration only"
+  },
+  "generatedCommandChecks": {
+    "manual": {
+      "bodyContains": "manual $ARGUMENTS",
+      "baseSuffix": ".config/opencode/.plgnz/packages/plgnz-m11-74x65x73x74-p14-70x72x6fx6fx66/skills/manual"
+    },
+    "source": {
+      "bodyContains": "run $1 $ARGUMENTS",
+      "baseSuffix": ".config/opencode/.plgnz/packages/plgnz-m11-74x65x73x74-p14-70x72x6fx6fx66/.claude/commands",
+      "nestedResourcePreserved": true
+    },
+    "automaticResourcePreserved": true
+  },
+  "nativeCommandCatalog": {
+    "endpoint": "GET /command",
+    "entries": [
+      { "name": "demo/manual", "source": "command", "hints": ["$ARGUMENTS"] },
+      { "name": "demo/run", "source": "command", "hints": ["$1", "$ARGUMENTS"] },
+      { "name": "demo/helper", "source": "command", "hints": ["$ARGUMENTS"] },
+      { "name": "ordinary", "source": "skill", "hints": [] }
+    ],
+    "rewrittenIntraPackageReference": "/helper -> /demo/helper"
+  },
+  "sourceReferences": [
+    "packages/opencode/src/skill/index.ts:53-59,205-208,321-345",
+    "packages/opencode/src/command/index.ts:90-102,134-151",
+    "packages/opencode/src/config/command.ts:13-38",
+    "packages/opencode/src/session/prompt.ts:1372-1395",
+    "packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts:139-147",
+    "packages/opencode/src/server/routes/instance/httpapi/handlers/instance.ts:76-78",
+    "packages/core/src/v1/config/command.ts:5-12"
+  ],
+  "limitations": [
+    "No command was sent through a model session. The native GET /command catalog establishes command names and placeholder hints; source inspection establishes OpenCode's $1.. and $ARGUMENTS substitution and its fallback tail behavior.",
+    "OpenCode's command loader trims template whitespace, so acceptance is semantic body and base preservation, not outer-whitespace byte identity. Package resources are copied byte-for-byte apart from plgnz ownership markers."
+  ]
+}

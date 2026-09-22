@@ -53,7 +53,7 @@ export const consumerProfiles: readonly ConsumerProfile[] = [
   pending('zcode-cli', 'Z.ai ZCode CLI plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('zcode-desktop', 'Z.ai ZCode desktop plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   profile('cursor', 'Cursor local plugin loader', 'docs/hosts/cursor.md', '2026.09.18-9a7762b', active),
-  pending('opencode', 'OpenCode standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  profile('opencode', 'OpenCode standalone skill and command loaders', 'docs/evidence/opencode-native-loader-20260922.json', '1.15.13', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   profile('pi', 'Pi standalone skill loader', 'docs/evidence/pi-native-loader-20260922.json', '0.80.10', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   pending('gemini-cli', 'Gemini CLI standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('factory', 'Factory standalone skill route', 'SPEC.md § Compatibility and lifecycle requirements'),

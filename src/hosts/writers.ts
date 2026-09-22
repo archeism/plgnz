@@ -11,5 +11,6 @@ import { cursorWriter } from './cursor-writer';
 import { ompWriter } from './omp-writer';
 import { piWriter } from './pi-writer';
 import { dcodeWriter } from './dcode-writer';
+import { opencodeWriter } from './opencode-writer';
 
-export const writers: HostWriter[] = [claudeCodeWriter, codexWriter, kimiWriter, cursorWriter, ompWriter, piWriter, dcodeWriter];
+export const writers: HostWriter[] = [claudeCodeWriter, codexWriter, kimiWriter, cursorWriter, ompWriter, piWriter, dcodeWriter, opencodeWriter];
