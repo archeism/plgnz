@@ -10,7 +10,7 @@ import { parse as parseToml } from 'smol-toml';
 import { readPluginManifest } from './source';
 
 declare const Bun: {
-  YAML: { parse(input: string): unknown };
+  YAML: { parse(input: string): unknown; stringify(input: unknown): string };
 };
 
 interface Command {
@@ -21,6 +21,17 @@ interface Command {
   allowImplicit: boolean;
   body: string;
   source: string;
+}
+
+interface OmpProjectionOptions {
+  /** Native npm/link package identity recorded by OMP. */
+  packageName: string;
+  /** Version recorded in OMP's runtime lock. */
+  version: string;
+  /** Final owned package root. Command resource hints must survive staging. */
+  activeRoot: string;
+  /** Public plugin namespace used for manual-only skill commands. */
+  namespace: string;
 }
 
 const COMMAND_FIELDS = new Set(['description', 'argument-hint', 'argument_hint', 'disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable']);
@@ -54,6 +65,103 @@ export function projectPluginForCodex(sourceDir: string, destinationDir: string)
     rmSync(stage, { recursive: true, force: true });
     throw error;
   }
+}
+
+/**
+ * Build one OMP native extension package. OMP's npm/link lane discovers the
+ * package's ordinary Agent Plugin skills and its commands/ directory together.
+ * Manual-only skills are kept out of skills/ and exposed as namespaced commands;
+ * a private source snapshot keeps every sibling reference and resource path.
+ */
+export function projectPluginForOmp(sourceDir: string, destinationDir: string, options: OmpProjectionOptions): void {
+  const source = resolve(sourceDir); const destination = resolve(destinationDir);
+  if (!existsSync(source) || !statSync(source).isDirectory()) throw new Error(`plugin source is not a directory: ${source}`);
+  if (destination === source || destination.startsWith(`${source}/`)) throw new Error('destination must not be inside the plugin source');
+  assertSafeTree(source); mkdirSync(destination, { recursive: true });
+  if (readdirSync(destination).length !== 0) throw new Error(`OMP projection destination must be empty: ${destination}`);
+  cpSync(source, destination, { recursive: true });
+  const privateRoot = join(destination, '.plgnz', 'source');
+  mkdirSync(dirname(privateRoot), { recursive: true });
+  cpSync(source, privateRoot, { recursive: true });
+
+  const commands = discoverCommands(source);
+  validateClaudeNativeSemantics(source, commands);
+  const projected = new Set<string>();
+  const commandNames = new Set(commands.map(command => command.name));
+  rmSync(join(destination, 'commands'), { recursive: true, force: true });
+  for (const command of commands) {
+    if (command.userInvocable === false) throw new Error(`user-invocable: false is unsupported by OMP command projection: ${command.source}`);
+    if (command.allowImplicit) throw new Error(`model-invocable source command is unsupported by OMP command projection: ${command.source}`);
+    writeOmpCommand(destination, `${options.namespace}:${command.name}`, command.description, command.argumentHint, rewriteOmpCommandReferences(command.body, commandNames, options.namespace),
+      join(options.activeRoot, '.plgnz', 'source', relativeCommandBase(source, command.source)), projected);
+  }
+
+  const skills = join(source, 'skills');
+  if (existsSync(skills)) {
+    for (const entry of readdirSync(skills).sort()) {
+      const skillDir = join(skills, entry); const skillFile = join(skillDir, 'SKILL.md');
+      if (!statSync(skillDir).isDirectory() || !existsSync(skillFile)) continue;
+      const parsed = parseManualSkill(skillDir);
+      if (parsed.userInvocable === false) throw new Error(`user-invocable: false is unsupported by OMP skill projection: ${skillFile}`);
+      if (!parsed.manual) { stripOmpInvocationMetadata(join(destination, 'skills', entry, 'SKILL.md'), parsed.metadata); continue; }
+      const commandName = `${options.namespace}:${parsed.name}`;
+      writeOmpCommand(destination, commandName, parsed.description, parsed.argumentHint, rewriteOmpCommandReferences(parsed.body, commandNames, options.namespace),
+        join(options.activeRoot, '.plgnz', 'source', 'skills', entry), projected);
+      rmSync(join(destination, 'skills', entry), { recursive: true, force: true });
+    }
+  }
+  writeFileSync(join(destination, 'package.json'), `${JSON.stringify({ name: options.packageName, version: options.version, omp: {} }, null, 2)}\n`);
+}
+
+function rewriteOmpCommandReferences(body: string, names: Set<string>, namespace: string): string {
+  return body.replace(/(^|[^A-Za-z0-9_:-])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,:;!?])/giu,
+    (whole, prefix: string, name: string) => names.has(name) ? `${prefix}/${namespace}:${name}` : whole);
+}
+
+function relativeCommandBase(source: string, path: string): string {
+  const parent = dirname(path);
+  if (parent === source) return '';
+  if (!parent.startsWith(`${source}/`)) throw new Error(`command source escapes plugin: ${path}`);
+  return parent.slice(source.length + 1);
+}
+
+function writeOmpCommand(root: string, name: string, description: string, argumentHint: string | undefined, body: string, base: string, names: Set<string>): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(name)) throw new Error(`unsafe OMP command name: ${name}`);
+  if (names.has(name)) throw new Error(`OMP command collision: ${name}`);
+  names.add(name);
+  const hint = argumentHint === undefined ? '' : `argument-hint: ${yamlString(argumentHint)}\n`;
+  const preserved = body.endsWith('\n') ? body : `${body}\n`;
+  mkdirSync(join(root, 'commands'), { recursive: true });
+  writeFileSync(join(root, 'commands', `${name}.md`), `---\ndescription: ${yamlString(description)}\n${hint}---\n${preserved}\nBase directory for this command: ${base}\nRelative paths in this command are relative to this base directory.\n`);
+}
+
+function parseManualSkill(directory: string): { name: string; description: string; argumentHint?: string; userInvocable?: boolean; manual: boolean; body: string; metadata: Record<string, unknown> } {
+  const path = join(directory, 'SKILL.md');
+  const raw = readFileSync(path, 'utf8');
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) throw new Error(`skill frontmatter is required: ${path}`);
+  const metadata = parseYaml(match[1] ?? '', path);
+  normalizeMetadata(metadata, path);
+  const name = metadata['name'], description = metadata['description'];
+  if (typeof name !== 'string' || !validSegment(name) || typeof description !== 'string' || !description.trim()) throw new Error(`invalid OMP skill identity: ${path}`);
+  const manual = metadata['disable-model-invocation'];
+  const userInvocable = metadata['user-invocable'];
+  const hint = metadata['argument-hint'];
+  if (manual !== undefined && typeof manual !== 'boolean') throw new Error(`disable-model-invocation must be boolean: ${path}`);
+  if (userInvocable !== undefined && typeof userInvocable !== 'boolean') throw new Error(`user-invocable must be boolean: ${path}`);
+  if (hint !== undefined && typeof hint !== 'string') throw new Error(`argument hint must be text: ${path}`);
+  const sidecar = join(directory, 'agents', 'openai.yaml');
+  const implicit = existsSync(sidecar) ? readImplicitPolicy(sidecar) : undefined;
+  if (implicit !== undefined && typeof manual === 'boolean' && implicit === manual) throw new Error(`conflicting invocation policy for native skill ${name}`);
+  return { name, description, ...(typeof hint === 'string' ? { argumentHint: hint } : {}), ...(typeof userInvocable === 'boolean' ? { userInvocable } : {}), manual: manual === true || implicit === false, body: match[2] ?? '', metadata };
+}
+
+function stripOmpInvocationMetadata(path: string, parsed: Record<string, unknown>): void {
+  const raw = readFileSync(path, 'utf8'); const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) throw new Error(`skill frontmatter is required: ${path}`);
+  const kept = { ...parsed };
+  for (const key of ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable', 'argument-hint', 'argument_hint']) delete kept[key];
+  writeFileSync(path, `---\n${Bun.YAML.stringify(kept).replace(/\s*$/u, '')}\n---\n${match[2] ?? ''}`);
 }
 
 function validateClaudeNativeSemantics(source: string, commands: Command[]): void {

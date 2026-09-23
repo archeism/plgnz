@@ -1,70 +1,137 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { omp } from '../src/hosts/omp';
 import { ompWriter } from '../src/hosts/omp-writer';
 import type { PluginSource, ResolvedSource } from '../src/source';
 import { writeFiles } from './util';
 
+const slug = '706572736f6e616c-64656d6f2d706c7567696e';
+const packageName = `@plgnz/${slug}`;
+const owned = (root: string): string => join(root, '.omp', 'plugins', 'plgnz', slug);
+const link = (root: string): string => join(root, '.omp', 'plugins', 'node_modules', packageName);
+
 function fixture(files: Record<string, string> = {}): { plugin: PluginSource; resolved: ResolvedSource } {
-  const root = mkdtempSync(join(tmpdir(), 'plgnz-omp-source-')); const dir = join(root, 'plugins', 'demo-plugin');
-  writeFiles(dir, { 'plugin.json': '{"name":"demo-plugin","version":"1.2.0"}', 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\n---\nbody\n', 'resources/value.txt': 'one\n', ...files });
-  const plugin: PluginSource = { dir, name: 'demo-plugin', marketplace: 'personal', contentFingerprint: 'one' };
-  return { plugin, resolved: { sourceUri: root, sha: '1.2.0', isGit: false, plugins: [plugin] } };
+  const root = mkdtempSync(join(tmpdir(), 'plgnz-omp-source-'));
+  const dir = join(root, 'plugins', 'demo-plugin');
+  writeFiles(dir, {
+    'plugin.json': '{"name":"demo-plugin","version":"1.2.0"}',
+    'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\n"disable-model-invocation": false\nuser-invocable: true\nargument-hint: >-\n  optional words\n---\nordinary body\n',
+    'skills/manual/SKILL.md': '---\nname: manual\ndescription: manual command\ndisable-model-invocation: true\nargument-hint: words\n---\nmanual $ARGUMENTS from resources/value.txt\n',
+    'skills/sidecar/SKILL.md': '---\nname: sidecar\ndescription: sidecar manual command\n---\nsidecar body\n',
+    'skills/sidecar/agents/openai.yaml': 'policy:\n  allow_implicit_invocation: false\n',
+    '.claude/commands/run.md': '---\ndescription: run command\nargument-hint: target\n---\nrun $1 / $ARGUMENTS then /run using ../../resources/value.txt\n',
+    'resources/value.txt': 'one\n',
+    ...files,
+  });
+  const plugin: PluginSource = { dir, name: 'demo-plugin', marketplace: 'personal', version: '1.2.0', contentFingerprint: 'one' };
+  return { plugin, resolved: { sourceUri: root, sha: 'source-sha', isGit: false, plugins: [plugin] } };
 }
-async function isolated(run: (root: string) => Promise<void>): Promise<void> { const root = mkdtempSync(join(tmpdir(), 'plgnz-omp-home-')); const old = process.env['OPEN_PLUGIN_OMP_ROOT']; process.env['OPEN_PLUGIN_OMP_ROOT'] = join(root, '.omp'); try { await run(root); } finally { if (old === undefined) delete process.env['OPEN_PLUGIN_OMP_ROOT']; else process.env['OPEN_PLUGIN_OMP_ROOT'] = old; rmSync(root, { recursive: true, force: true }); } }
+
+async function isolated(run: (root: string) => Promise<void>): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), 'plgnz-omp-home-'));
+  const old = process.env['OPEN_PLUGIN_OMP_ROOT'];
+  process.env['OPEN_PLUGIN_OMP_ROOT'] = join(root, '.omp');
+  try { await run(root); }
+  finally {
+    if (old === undefined) delete process.env['OPEN_PLUGIN_OMP_ROOT']; else process.env['OPEN_PLUGIN_OMP_ROOT'] = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 async function failure(run: () => Promise<unknown>): Promise<Error> { try { await run(); } catch (error) { return error as Error; } throw new Error('expected failure'); }
 
-describe('OMP native cache lifecycle', () => {
-  test('activates a marked copy and preserves unrelated user configuration', async () => isolated(async root => {
-    const incoming = fixture(); writeFiles(join(root, '.omp'), { 'marketplaces.json': '{"marketplaces":[{"name":"user"}]}' });
+describe('OMP native extension-package lifecycle', () => {
+  test('projects ordinary skills, commands, and manual-only skills into one native package', async () => isolated(async root => {
+    const incoming = fixture();
+    writeFiles(join(root, '.omp'), { 'marketplaces.json': '{"marketplaces":[{"name":"user"}]}' });
     await ompWriter.add(incoming.plugin, incoming.resolved);
-    const target = join(root, '.omp/plugins/cache/plugins/personal___demo-plugin___1.2.0');
-    expect(readFileSync(join(target, 'resources/value.txt'), 'utf8')).toBe('one\n');
-    expect(JSON.parse(readFileSync(join(target, '.plgnz-install.json'), 'utf8')).source).toBe(incoming.resolved.sourceUri);
+    const target = owned(root);
+    expect(JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'))).toEqual({ name: packageName, version: '1.2.0', omp: {} });
+    expect(readFileSync(join(target, 'skills/ordinary/SKILL.md'), 'utf8')).toContain('ordinary body');
+    expect(readFileSync(join(target, 'skills/ordinary/SKILL.md'), 'utf8').includes('disable-model-invocation')).toBe(false);
+    expect(existsSync(join(target, 'skills/manual'))).toBe(false);
+    expect(existsSync(join(target, 'skills/sidecar'))).toBe(false);
+    expect(readFileSync(join(target, '.plgnz/source/skills/manual/SKILL.md'), 'utf8')).toContain('manual $ARGUMENTS');
+    expect(readFileSync(join(target, 'commands/demo-plugin:manual.md'), 'utf8')).toContain(join(target, '.plgnz/source/skills/manual'));
+    expect(readFileSync(join(target, 'commands/demo-plugin:sidecar.md'), 'utf8')).toContain('sidecar body');
+    expect(readFileSync(join(target, 'commands/demo-plugin:run.md'), 'utf8')).toContain('/demo-plugin:run');
+    expect(readFileSync(join(target, 'commands/demo-plugin:run.md'), 'utf8')).toContain(join(target, '.plgnz/source/.claude/commands'));
+    expect(lstatSync(link(root)).isSymbolicLink()).toBe(true);
+    expect(resolve(dirname(link(root)), readlinkSync(link(root)))).toBe(target);
+    expect(JSON.parse(readFileSync(join(root, '.omp/plugins/omp-plugins.lock.json'), 'utf8')).plugins[packageName].enabled).toBe(true);
     expect(readFileSync(join(root, '.omp/marketplaces.json'), 'utf8')).toContain('user');
-    expect(omp.listInstalled().find(plugin => plugin.id === 'demo-plugin@personal')?.path).toBe(target);
+    expect(omp.listInstalled().some(plugin => plugin.id === 'demo-plugin@personal' && plugin.path === target && plugin.version === '1.2.0')).toBe(true);
   }));
-  test('is unchanged for equal bytes and refreshes changed same-version content', async () => isolated(async root => {
-    const incoming = fixture(); await ompWriter.add(incoming.plugin, incoming.resolved); expect(await ompWriter.add(incoming.plugin, incoming.resolved)).toBe('unchanged');
-    const target = join(root, '.omp/plugins/cache/plugins/personal___demo-plugin___1.2.0');
-    const lock = join(root, '.omp/plugins/omp-plugins.lock.json');
-    writeFileSync(lock, JSON.stringify({ plugins: { 'demo-plugin': { version: '1.2.0', enabled: false, userSetting: 'keep' } } }));
-    expect(await ompWriter.add(incoming.plugin, incoming.resolved)).toBe('unchanged');
-    expect(JSON.parse(readFileSync(lock, 'utf8')).plugins['demo-plugin']).toEqual({ version: '1.2.0', enabled: true, userSetting: 'keep' });
-    expect(readdirSync(join(root, '.omp/plugins/cache/plugins')).some(name => name.startsWith('.plgnz-omp-stage-'))).toBe(false);
-    writeFileSync(join(incoming.plugin.dir, 'resources/value.txt'), 'two\n'); incoming.plugin.contentFingerprint = 'two'; await ompWriter.add(incoming.plugin, incoming.resolved);
-    expect(readFileSync(join(target, 'resources/value.txt'), 'utf8')).toBe('two\n');
-  }));
-  test('fails unsupported invocation policy before dry-run creates a store', async () => isolated(async root => {
-    const incoming = fixture({ 'skills/manual/SKILL.md': '---\nname: manual\ndescription: manual\ndisable-model-invocation: true\n---\nbody\n' });
-    expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved, { dryRun: true }))).message).toContain('disable-model-invocation'); expect(existsSync(join(root, '.omp/plugins'))).toBe(false);
-  }));
-  test('refuses an unowned collision, retains old content on stage failure, and removes only marked copy', async () => isolated(async root => {
-    const incoming = fixture(); const target = join(root, '.omp/plugins/cache/plugins/personal___demo-plugin___1.2.0'); writeFiles(target, { 'foreign.txt': 'keep\n' });
-    expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved))).message).toContain('unowned'); expect(readFileSync(join(target, 'foreign.txt'), 'utf8')).toBe('keep\n'); rmSync(target, { recursive: true, force: true });
-    await ompWriter.add(incoming.plugin, incoming.resolved); writeFileSync(join(incoming.plugin.dir, 'plugin.json'), '{bad'); incoming.plugin.contentFingerprint = 'bad'; await failure(() => ompWriter.add(incoming.plugin, incoming.resolved));
-    expect(readFileSync(join(target, 'resources/value.txt'), 'utf8')).toBe('one\n'); writeFiles(join(root, '.omp/plugins/cache/plugins/personal___foreign___1.0.0'), { 'foreign.txt': 'keep\n' }); await ompWriter.remove('demo-plugin@personal');
-    expect(existsSync(target)).toBe(false); expect(existsSync(join(root, '.omp/plugins/cache/plugins/personal___foreign___1.0.0'))).toBe(true);
-  }));
-  test('refuses unverified commands before activation and compares binary resource bytes', async () => isolated(async root => {
-    const commands = fixture({ 'commands/example.toml': 'name = "example"\n' });
-    expect((await failure(() => ompWriter.add(commands.plugin, commands.resolved))).message).toContain('command conversion/lifecycle');
-    expect(existsSync(join(root, '.omp/plugins'))).toBe(false);
-    const incoming = fixture({ 'resources/value.bin': '\uFFFD' }); await ompWriter.add(incoming.plugin, incoming.resolved);
-    const writeBytes = writeFileSync as unknown as (path: string, data: Uint8Array) => void;
-    writeBytes(join(incoming.plugin.dir, 'resources/value.bin'), new Uint8Array([0xfe])); incoming.plugin.contentFingerprint = 'binary-two';
+
+  test('re-adds unchanged, refreshes same-version bytes, and preserves the active copy after a failed projection', async () => isolated(async root => {
+    const incoming = fixture();
     await ompWriter.add(incoming.plugin, incoming.resolved);
-    const target = join(root, '.omp/plugins/cache/plugins/personal___demo-plugin___1.2.0/resources/value.bin');
-    const raw = readFileSync as unknown as (path: string) => Uint8Array;
-    expect(Array.from(raw(target))).toEqual([0xfe]);
+    expect(await ompWriter.add(incoming.plugin, incoming.resolved)).toBe('unchanged');
+    writeFileSync(join(incoming.plugin.dir, 'resources/value.txt'), 'two\n'); incoming.plugin.contentFingerprint = 'two';
+    await ompWriter.add(incoming.plugin, incoming.resolved);
+    expect(readFileSync(join(owned(root), 'resources/value.txt'), 'utf8')).toBe('two\n');
+    writeFileSync(join(incoming.plugin.dir, '.claude/commands/run.md'), '---\ndescription: unsafe\nuser-invocable: false\n---\nunsafe\n'); incoming.plugin.contentFingerprint = 'unsafe';
+    expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved))).message).toContain('user-invocable: false');
+    expect(readFileSync(join(owned(root), 'resources/value.txt'), 'utf8')).toBe('two\n');
+    expect(readFileSync(join(owned(root), 'commands/demo-plugin:run.md'), 'utf8')).toContain('run $1');
   }));
-  test('rolls back an earlier owned path when a later remove move fails', async () => isolated(async root => {
+
+  test('rolls back the old directory and link when activation fails after moving the directory aside', async () => isolated(async root => {
     const incoming = fixture(); await ompWriter.add(incoming.plugin, incoming.resolved);
-    const target = join(root, '.omp/plugins/cache/plugins/personal___demo-plugin___1.2.0'); const registry = join(root, '.omp/plugins/installed_plugins.json');
-    const document = JSON.parse(readFileSync(registry, 'utf8')); document.plugins['demo-plugin@personal'].push({ ...document.plugins['demo-plugin@personal'][0] }); writeFileSync(registry, JSON.stringify(document));
-    await failure(() => ompWriter.remove('demo-plugin@personal'));
-    expect(existsSync(target)).toBe(true); expect(JSON.parse(readFileSync(registry, 'utf8'))).toEqual(document);
+    writeFileSync(join(incoming.plugin.dir, 'resources/value.txt'), 'two\n'); incoming.plugin.contentFingerprint = 'two';
+    process.env['OPEN_PLUGIN_TEST_OMP_ACTIVATION_FAILURE'] = 'after-old-move';
+    try { expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved))).message).toContain('forced OMP activation failure'); }
+    finally { delete process.env['OPEN_PLUGIN_TEST_OMP_ACTIVATION_FAILURE']; }
+    expect(readFileSync(join(owned(root), 'resources/value.txt'), 'utf8')).toBe('one\n');
+    expect(resolve(dirname(link(root)), readlinkSync(link(root)))).toBe(owned(root));
+  }));
+
+  test('migrates a selected legacy marketplace row only with adoption and removes legacy bytes after activation', async () => isolated(async root => {
+    const incoming = fixture();
+    const legacy = join(root, '.omp/plugins/cache/plugins/personal___demo-plugin___1.2.0');
+    writeFiles(legacy, { 'plugin.json': '{"name":"demo-plugin","version":"1.2.0"}', 'skills/ordinary/SKILL.md': '---\nname: ordinary\ndescription: ordinary\n---\nlocally edited legacy bytes\n' });
+    writeFiles(join(root, '.omp/plugins'), {
+      'installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'demo-plugin@personal': [{ scope: 'user', installPath: legacy, version: '1.2.0' }] } }),
+      'omp-plugins.lock.json': JSON.stringify({ plugins: { 'demo-plugin': { version: '1.2.0', enabled: true } }, settings: {} }),
+    });
+    mkdirSync(join(root, '.omp/plugins/node_modules'), { recursive: true });
+    const legacyLink = join(root, '.omp/plugins/node_modules/demo-plugin'); symlinkSync(legacy, legacyLink);
+    expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved))).message).toContain('--adopt-existing');
+    await ompWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true });
+    expect(existsSync(legacy)).toBe(false); expect(existsSync(legacyLink)).toBe(false);
+    expect(readFileSync(join(owned(root), 'skills/ordinary/SKILL.md'), 'utf8')).toContain('ordinary body');
+    const registry = JSON.parse(readFileSync(join(root, '.omp/plugins/installed_plugins.json'), 'utf8'));
+    expect(registry.plugins['demo-plugin@personal']).toBeUndefined();
+    const lock = JSON.parse(readFileSync(join(root, '.omp/plugins/omp-plugins.lock.json'), 'utf8'));
+    expect(lock.plugins['demo-plugin']).toBeUndefined(); expect(lock.plugins[packageName].enabled).toBe(true);
+  }));
+
+  test('removes only the marked package and refuses a redirected native link', async () => isolated(async root => {
+    const incoming = fixture(); await ompWriter.add(incoming.plugin, incoming.resolved);
+    const foreign = join(root, 'foreign'); writeFiles(foreign, { 'keep.txt': 'keep\n' });
+    rmSync(link(root)); symlinkSync(foreign, link(root));
+    expect((await failure(() => ompWriter.remove('demo-plugin@personal'))).message).toContain('redirected');
+    expect(existsSync(owned(root))).toBe(true);
+    rmSync(link(root)); symlinkSync(owned(root), link(root));
+    await ompWriter.remove('demo-plugin@personal');
+    expect(existsSync(owned(root))).toBe(false); expect(existsSync(link(root))).toBe(false); expect(existsSync(foreign)).toBe(true);
+  }));
+
+  test('dry-run refuses unsupported invocation gates without creating the OMP store', async () => isolated(async root => {
+    const incoming = fixture({ 'skills/private/SKILL.md': '---\nname: private\ndescription: private\nuser-invocable: false\n---\nprivate\n' });
+    expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved, { dryRun: true }))).message).toContain('user-invocable: false');
+    expect(existsSync(join(root, '.omp/plugins'))).toBe(false);
+  }));
+
+  test('refuses arbitrary legacy paths and an unowned managed target without deleting either', async () => isolated(async root => {
+    const incoming = fixture(); const outside = join(root, 'outside'); writeFiles(outside, { 'plugin.json': '{"name":"demo-plugin","version":"1.2.0"}', 'keep.txt': 'keep\n' });
+    writeFiles(join(root, '.omp/plugins'), { 'installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'demo-plugin@personal': [{ scope: 'user', installPath: outside, version: '1.2.0' }] } }) });
+    expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true }))).message).toContain('approved cache slot');
+    expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('keep\n');
+    rmSync(join(root, '.omp/plugins/installed_plugins.json'));
+    writeFiles(owned(root), { 'foreign.txt': 'keep\n' });
+    expect((await failure(() => ompWriter.add(incoming.plugin, incoming.resolved))).message).toContain('unowned');
+    expect(readFileSync(join(owned(root), 'foreign.txt'), 'utf8')).toBe('keep\n');
   }));
 });

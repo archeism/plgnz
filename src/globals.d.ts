@@ -27,7 +27,8 @@ declare module 'node:fs' {
   export function mkdtempSync(prefix: string): string;
   export function renameSync(oldPath: string, newPath: string): void;
   export function realpathSync(path: string): string;
-  export function symlinkSync(target: string, path: string): void;
+  export function symlinkSync(target: string, path: string, type?: 'dir' | 'file' | 'junction'): void;
+  export function readlinkSync(path: string): string;
   export const constants: { X_OK: number };
 }
 

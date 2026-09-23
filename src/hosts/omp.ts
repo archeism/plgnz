@@ -24,8 +24,8 @@
  * mcp.json/.mcp.json alone; the shadow check therefore has no user side to
  * trip on until such a config is verified to exist.
  */
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readdirSync, readlinkSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
 import { ompRoot } from '../paths';
 import { collectPluginServers, readJson, type PluginMcpCandidate } from '../mcp';
@@ -53,6 +53,45 @@ function lockEnabled(name: string): boolean | undefined {
   return (entry as Record<string, unknown>)['enabled'] === false ? false : undefined;
 }
 
+type ManagedMarker = {
+  pluginId: string;
+  packageName: string;
+};
+
+function managedMarker(path: string): ManagedMarker | null {
+  const value = readJson(join(path, '.plgnz-install.json'));
+  if (value === null || typeof value['pluginId'] !== 'string' || typeof value['packageName'] !== 'string') return null;
+  return { pluginId: value['pluginId'], packageName: value['packageName'] };
+}
+
+function managedInstalled(): InstalledPlugin[] {
+  const managed = join(pluginsDir(), 'plgnz');
+  if (!existsSync(managed)) return [];
+  const out: InstalledPlugin[] = [];
+  for (const entry of readdirSync(managed).sort()) {
+    const path = join(managed, entry);
+    if (!lstatSync(path).isDirectory()) continue;
+    const marker = managedMarker(path);
+    const manifest = readJson(join(path, 'package.json'));
+    if (marker === null || manifest === null || manifest['name'] !== marker.packageName) continue;
+    const link = join(pluginsDir(), 'node_modules', marker.packageName);
+    try {
+      if (!lstatSync(link).isSymbolicLink() || resolve(dirname(link), readlinkSync(link)) !== resolve(path)) continue;
+    } catch {
+      continue;
+    }
+    const at = marker.pluginId.indexOf('@');
+    const name = at === -1 ? marker.pluginId : marker.pluginId.slice(0, at);
+    const marketplace = at === -1 ? undefined : marker.pluginId.slice(at + 1);
+    const plugin: InstalledPlugin = { id: marker.pluginId, name, path };
+    if (marketplace !== undefined) plugin.marketplace = marketplace;
+    if (typeof manifest['version'] === 'string') plugin.version = manifest['version'];
+    if (lockEnabled(marker.packageName) === false) plugin.enabled = false;
+    out.push(plugin);
+  }
+  return out;
+}
+
 export const omp: HostReader = {
   id: 'omp',
   gui: false,
@@ -67,12 +106,15 @@ export const omp: HostReader = {
   },
 
   listInstalled(): InstalledPlugin[] {
+    const managed = managedInstalled();
+    const managedIds = new Set(managed.map(plugin => plugin.id));
     const root = readJson(join(pluginsDir(), 'installed_plugins.json'));
-    if (root === null) return [];
+    if (root === null) return managed;
     const plugins = root['plugins'];
-    if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins)) return [];
-    const out: InstalledPlugin[] = [];
+    if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins)) return managed;
+    const out: InstalledPlugin[] = [...managed];
     for (const [id, value] of Object.entries(plugins as Record<string, unknown>)) {
+      if (managedIds.has(id)) continue;
       const at = id.indexOf('@');
       const name = at === -1 ? id : id.slice(0, at);
       const marketplace = at === -1 ? undefined : id.slice(at + 1);

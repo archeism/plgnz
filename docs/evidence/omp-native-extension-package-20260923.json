@@ -1,0 +1,56 @@
+{
+  "date": "2026-09-23",
+  "host": {
+    "binary": "/Users/chaz/.bun/bin/omp",
+    "version": "18.1.4",
+    "source": "/Users/chaz/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src"
+  },
+  "question": "Can one existing OMP native plugin package preserve ordinary skills, source commands, and manual-only skills without standalone fanout or an OMP fork?",
+  "native_route": {
+    "kind": "enabled npm/link extension package",
+    "manifest": "package.json containing omp:{}",
+    "link": "~/.omp/plugins/node_modules/@plgnz/<encoded-identity>",
+    "package_root": "~/.omp/plugins/plgnz/<encoded-identity>",
+    "source_proof": [
+      "src/discovery/omp-extension-roots.ts:listInstalledPluginRoots",
+      "src/discovery/omp-plugins.ts:loadSkills",
+      "src/discovery/omp-plugins.ts:loadSlashCommands",
+      "src/extensibility/plugins/loader.ts:getEnabledPlugins"
+    ]
+  },
+  "isolated_probe": {
+    "test": "test/omp-native-loader.test.ts",
+    "command": "OMP_NATIVE_LOADER=1 bun test test/omp-native-loader.test.ts",
+    "environment": "temporary HOME, PI_CONFIG_DIR=.omp, empty cwd; PI_CODING_AGENT_DIR, OMP_PROFILE, PI_PROFILE, and XDG data/state/cache overrides removed",
+    "model_request": false,
+    "real_home_mutation": false,
+    "result": "1 pass, 21 assertions",
+    "observed": [
+      "ordinary skill discovered from the native package",
+      "manual-only skill absent from skill discovery",
+      "sidecar-only allow_implicit_invocation:false skill absent from skill discovery",
+      "manual-only skill discovered as namespaced slash command",
+      "sidecar-only manual skill discovered as namespaced slash command",
+      "source Markdown command discovered under the package namespace",
+      "$1 and $ARGUMENTS expanded through OMP's real expandSlashCommand",
+      "expanded command contains the final private source/resource base directory",
+      "same-version source resource refresh becomes visible",
+      "failed gated update preserves active commands",
+      "remove eliminates the package's skills and commands"
+    ]
+  },
+  "deterministic_lifecycle": {
+    "test": "test/omp-lifecycle.test.ts",
+    "result": "7 pass",
+    "coverage": [
+      "package projection and logical reader identity",
+      "unchanged re-add and same-version refresh",
+      "failed projection preserves active bytes",
+      "injected activation failure after old-directory move restores old bytes and link",
+      "contained legacy marketplace adoption",
+      "redirected-link removal refusal",
+      "outside-cache and unowned-slot refusal"
+    ]
+  },
+  "conclusion": "The marketplace command exclusion is real but is not a host-wide blocker. OMP's existing native npm/link extension-package lifecycle preserves the selected plugin surfaces without standalone fanout or upstream modification."
+}
