@@ -21,3 +21,5 @@ Why another tool: `npx plugins` is closed-source and its Cursor target does not 
 Status: pre-alpha, scaffolding in progress. Requires Bun on PATH; the CLI runs under Bun.
 
 Published on npm as `plgnz`; source repository: `archeism/plgnz`.
+
+Maintainers: see [publishing instructions](docs/publishing.md) for the manual npm release workflow.
