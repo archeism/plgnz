@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, writeFileSync }
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { materialize, materializeInto, withHostEnvAsync, initGitRepo, repoRoot } from './util';
+import { materialize, materializeInto, withHostEnvAsync, initGitRepo, repoRoot, writeLedger } from './util';
 import { main } from '../src/cli';
 import { readState } from '../src/state';
 import { claudeCode } from '../src/hosts/claude-code';
@@ -125,6 +125,79 @@ describe('add', () => {
 
       const state = readState();
       expect(state.find(r => r.id === 'new-plugin' && r.host === 'cursor') !== undefined).toBe(true);
+    });
+  });
+
+  test('cursor > marketplace collection survives add, list, doctor, legacy pending repair, update failures, and removal', async () => {
+    await withHostEnvAsync('cursor', async (home) => {
+      rmSync(join(home, '.cursor', 'plugins', 'local', 'demo-plugin'), { recursive: true, force: true });
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-cursor-marketplace-'));
+      initGitRepo(sourceDir, {
+        '.claude-plugin/marketplace.json': JSON.stringify({ name: 'personal', plugins: [{ name: 'personal', source: './plugins/personal' }] }),
+        'plugins/personal/plugin.json': JSON.stringify({ name: 'personal', version: '0.2.0' }),
+        'plugins/personal/skills/skill/SKILL.md': '# Personal\n',
+      });
+
+      expect(await main(['add', sourceDir, '--target', 'cursor', '--plugin', 'personal', '--adopt-existing', '--json'])).toBe(0);
+      expect(cursor.listInstalled().some((plugin) => plugin.id === 'personal' && plugin.name === 'personal' && plugin.marketplace === 'personal')).toBe(true);
+
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (value: string) => output.push(value);
+      try {
+        expect(await main(['list', '--target', 'cursor', '--json'])).toBe(0);
+        const listed = JSON.parse(output.join('')) as Array<{ host: string; plugins: Array<{ id: string; marketplace?: string }> }>;
+        expect(listed).toHaveLength(1);
+        expect(listed[0]?.host).toBe('cursor');
+        expect(listed[0]?.plugins.some((plugin) => plugin.id === 'personal' && plugin.marketplace === 'personal')).toBe(true);
+
+        output.length = 0;
+        expect(await main(['doctor', '--target', 'cursor', '--json'])).toBe(0);
+        const findings = JSON.parse(output.join('')) as Array<{ host: string; mark: string }>;
+        expect(findings.some((finding) => finding.host === 'cursor' && finding.mark === '✗')).toBe(false);
+
+        const original = readState().find((record) => record.host === 'cursor' && record.id === 'personal');
+        expect(original === undefined).toBe(false);
+        const target = join(home, '.cursor', 'plugins', 'local', 'personal');
+        // This is the state left by the old writer: a native bare marker and
+        // a pending marketplace-qualified CLI record. Retrying must recover it.
+        writeFileSync(join(target, '.plgnz-install.json'), JSON.stringify({ source: sourceDir, pluginId: 'personal', fingerprint: original?.fingerprint ?? '' }));
+        writeLedger(home, [{ ...original!, id: 'personal@personal', pending: 'install' }]);
+
+        output.length = 0;
+        expect(await main(['add', sourceDir, '--target', 'cursor', '--plugin', 'personal', '--adopt-existing', '--json'])).toBe(0);
+        expect((JSON.parse(readFileSync(join(target, '.plgnz-install.json'), 'utf8')) as { pluginId?: string }).pluginId).toBe('personal@personal');
+        expect(readState().find((record) => record.host === 'cursor' && record.id === 'personal')?.pending).toBeUndefined();
+
+        output.length = 0;
+        expect(await main(['add', sourceDir, '--target', 'cursor', '--plugin', 'personal', '--adopt-existing', '--json'])).toBe(0);
+        const outcomes = JSON.parse(output.join('')) as Array<{ status: string; nativeId: string }>;
+        expect(outcomes.some((outcome) => outcome.status === 'unchanged' && outcome.nativeId === 'personal@personal')).toBe(true);
+
+        writeFileSync(join(sourceDir, 'plugins', 'personal', 'skills', 'skill', 'SKILL.md'), '# Personal v2\n');
+        output.length = 0;
+        expect(await main(['update', 'personal', '--target', 'cursor', '--json'])).toBe(0);
+        expect(readFileSync(join(target, 'skills', 'skill', 'SKILL.md'), 'utf8')).toBe('# Personal v2\n');
+
+        mkdirSync(join(sourceDir, 'plugins', 'personal', '.claude', 'commands'), { recursive: true });
+        writeFileSync(join(sourceDir, 'plugins', 'personal', '.claude', 'commands', 'unverified.md'), '# command\n');
+        output.length = 0;
+        expect(await main(['update', 'personal', '--target', 'cursor', '--json'])).toBe(1);
+        expect(readFileSync(join(target, 'skills', 'skill', 'SKILL.md'), 'utf8')).toBe('# Personal v2\n');
+        expect(readState().some((record) => record.host === 'cursor' && record.id === 'personal' && record.pending === 'install')).toBe(true);
+
+        rmSync(join(sourceDir, 'plugins', 'personal', '.claude'), { recursive: true, force: true });
+        output.length = 0;
+        expect(await main(['update', 'personal', '--target', 'cursor', '--json'])).toBe(0);
+        expect(readState().find((record) => record.host === 'cursor' && record.id === 'personal')?.pending).toBeUndefined();
+
+        output.length = 0;
+        expect(await main(['remove', 'personal', '--target', 'cursor', '--json'])).toBe(0);
+        expect(existsSync(target)).toBe(false);
+        expect(readState().find((record) => record.host === 'cursor' && record.id === 'personal')).toBeUndefined();
+      } finally {
+        console.log = originalLog;
+      }
     });
   });
 

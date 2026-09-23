@@ -17,7 +17,7 @@
  * commands cannot be assumed to resolve (spec §7.2.1) — doctor flags them and
  * `pin` rewrites them to absolute paths; `add` pins a fresh copy the same way.
  */
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HostReader, InstalledPlugin, McpServerEntry } from '../host';
 import { cursorRoot } from '../paths';
@@ -64,6 +64,8 @@ export const cursor: HostReader = {
       const manifest = join(dir, '.cursor-plugin', 'plugin.json');
       if (!existsSync(manifest)) continue;
       const plugin: InstalledPlugin = { id: entry, name: entry, path: dir };
+      const marketplace = ownershipMarketplace(dir, entry);
+      if (marketplace !== undefined) plugin.marketplace = marketplace;
       const parsed = readJson(manifest);
       const version = parsed !== null ? parsed['version'] : undefined;
       if (typeof version === 'string') plugin.version = version;
@@ -82,3 +84,24 @@ export const cursor: HostReader = {
     return entries;
   },
 };
+
+/** Recover a collection identity only from a valid plgnz ownership marker. */
+function ownershipMarketplace(dir: string, name: string): string | undefined {
+  const marker = join(dir, '.plgnz-install.json');
+  if (!existsSync(marker)) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(marker, 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const ownership = parsed as Record<string, unknown>;
+    if (typeof ownership['source'] !== 'string' || typeof ownership['fingerprint'] !== 'string' || typeof ownership['pluginId'] !== 'string') return undefined;
+    const prefix = `${name}@`;
+    const marketplace = ownership['pluginId'].startsWith(prefix) ? ownership['pluginId'].slice(prefix.length) : undefined;
+    return marketplace !== undefined && validIdentity(marketplace) ? marketplace : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function validIdentity(value: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]*$/iu.test(value);
+}

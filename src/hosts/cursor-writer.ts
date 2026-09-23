@@ -16,6 +16,7 @@ export const cursorWriter: HostWriter = {
   supportsAdoption: true,
   async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void | 'unchanged'> {
     const id = plugin.name;
+    const ownershipId = plugin.marketplace === undefined ? id : `${id}@${plugin.marketplace}`;
     assertSafeIdentity(id);
     const root = localDir();
     const target = join(root, id);
@@ -28,10 +29,10 @@ export const cursorWriter: HostWriter = {
       // Preserve an unresolved bare command for the existing read-only `pin`
       // diagnosis path; activation must not rewrite it into a guessed command.
       await pinPluginMcpFiles(stage, mcpCandidates(), { dryRun: false });
-      writeOwnership(stage, { source: resolved.sourceUri, pluginId: id, fingerprint: plugin.contentFingerprint ?? '' });
+      writeOwnership(stage, { source: resolved.sourceUri, pluginId: ownershipId, fingerprint: plugin.contentFingerprint ?? '' });
 
       const marker = readOwnership(target);
-      if (marker !== null && (marker.source !== resolved.sourceUri || marker.pluginId !== id)) {
+      if (marker !== null && (marker.source !== resolved.sourceUri || !matchesOwnership(marker.pluginId, id, ownershipId))) {
         throw new Error(`Cursor local plugin ${id} belongs to another source; refusing to replace it`);
       }
       const identicalUnowned = existsSync(target) && marker === null && sameTree(stage, target);
@@ -40,7 +41,9 @@ export const cursorWriter: HostWriter = {
         validateExistingIdentity(target, id, sourceVersion(plugin.dir));
       }
 
-      const unchanged = marker !== null && marker.fingerprint === (plugin.contentFingerprint ?? '') && sameTree(stage, target);
+      // A bare legacy marker has no collection identity. Re-write it on the
+      // next successful add so reader metadata and the durable state agree.
+      const unchanged = marker !== null && marker.pluginId === ownershipId && marker.fingerprint === (plugin.contentFingerprint ?? '') && sameTree(stage, target);
       if (opts?.dryRun) {
         console.log(`[cursor] would activate directory: ${target}`);
         return unchanged ? 'unchanged' : undefined;
@@ -62,7 +65,7 @@ export const cursorWriter: HostWriter = {
     const target = join(root, id);
     assertManagedDirectory(root, target);
     const marker = readOwnership(target);
-    if (marker === null || marker.pluginId !== id) return;
+    if (marker === null || !ownsNativeDirectory(marker.pluginId, id)) return;
     rmSync(target, { recursive: true, force: true });
   },
 };
@@ -147,6 +150,17 @@ function readOwnership(target: string): Ownership | null {
 
 function writeOwnership(stage: string, ownership: Ownership): void {
   writeFileSync(join(stage, OWNERSHIP), JSON.stringify(ownership));
+}
+
+/** A legacy bare marker remains owned only for this exact native directory. */
+function matchesOwnership(markerId: string, nativeId: string, ownershipId: string): boolean {
+  return markerId === nativeId || markerId === ownershipId;
+}
+
+function ownsNativeDirectory(markerId: string, nativeId: string): boolean {
+  if (markerId === nativeId) return true;
+  const prefix = `${nativeId}@`;
+  return markerId.startsWith(prefix) && validIdentity(markerId.slice(prefix.length));
 }
 
 function activate(stage: string, target: string, root: string): { commit(): void } {

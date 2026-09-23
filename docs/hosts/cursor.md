@@ -88,3 +88,6 @@ need not install into the real store. The attempted isolated `--mode ask`
 loader probe was rejected for exhausted usage before it could produce a
 transcript. It therefore establishes the isolation seam, not runtime skill
 loading.
+
+The separate public marketplace lifecycle and Personal composition evidence is
+recorded in [Personal → plgnz → Cursor composition](../evidence/personal-cursor-composition-20260923.md).
