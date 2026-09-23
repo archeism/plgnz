@@ -58,21 +58,22 @@ describe('update · re-add from the recorded source', () => {
     });
   });
 
-  test('reports a declared target with no active adapter as unverified without reading or writing the ledger', async () => {
-    await withHostEnvAsync('kimi', async () => {
+  test('accepts the active Hermes adapter and reports an empty ledger without mutation', async () => {
+    await withHostEnvAsync('kimi', async (home) => {
+      writeFiles(join(home, '.hermes'), { 'plugins/.keep': '' });
       const output: string[] = [];
       const originalLog = console.log;
       console.log = (value: string) => output.push(value);
       try {
-        expect(await main(['update', '--target', 'hermes', '--json'])).toBe(1);
+        expect(await main(['update', '--target', 'hermes', '--json'])).toBe(0);
       } finally { console.log = originalLog; }
       const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string; action: string; dryRun: boolean; diagnostic?: string }>;
       expect(outcomes).toHaveLength(1);
-      expect(outcomes[0]?.target).toBe('hermes');
+      expect(outcomes[0]?.target).toBe('plgnz');
       expect(outcomes[0]?.status).toBe('unverified');
       expect(outcomes[0]?.action).toBe('update');
       expect(outcomes[0]?.dryRun).toBe(false);
-      expect(outcomes[0]?.diagnostic).toContain('unverified for update');
+      expect(outcomes[0]?.diagnostic).toContain('nothing to update');
       expect(readState()).toEqual([]);
     });
   });

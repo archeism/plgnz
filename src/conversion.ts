@@ -8,6 +8,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse as parseToml } from 'smol-toml';
 import { readPluginManifest } from './source';
+import { hermesCommandCompanionId } from './hermes-identity';
 
 declare const Bun: {
   YAML: { parse(input: string): unknown; stringify(input: unknown): string };
@@ -33,6 +34,8 @@ interface OmpProjectionOptions {
   /** Public plugin namespace used for manual-only skill commands. */
   namespace: string;
 }
+
+interface HermesSkill { name: string; description: string; userOnly: boolean }
 
 const COMMAND_FIELDS = new Set(['description', 'argument-hint', 'argument_hint', 'disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable']);
 const UNSUPPORTED_FIELDS = new Set(['allowed-tools', 'allowed_tools', 'permissionMode', 'permission_mode', 'hooks', 'model', 'context']);
@@ -162,6 +165,93 @@ function stripOmpInvocationMetadata(path: string, parsed: Record<string, unknown
   const kept = { ...parsed };
   for (const key of ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable', 'argument-hint', 'argument_hint']) delete kept[key];
   writeFileSync(path, `---\n${Bun.YAML.stringify(kept).replace(/\s*$/u, '')}\n---\n${match[2] ?? ''}`);
+
+}
+
+/**
+ * Preserve the portable Agent Plugin as the primary package and, when prompt
+ * commands exist, generate a sibling native directory plugin. The native
+ * handler queues the expanded prompt through PluginContext.inject_message;
+ * it never prints a prompt as if that had started a model turn.
+ */
+export function projectPluginForHermes(sourceDir: string, destinationDir: string, companionDir?: string): void {
+  const source = resolve(sourceDir);
+  const destination = resolve(destinationDir);
+  if (!existsSync(source) || !statSync(source).isDirectory()) throw new Error(`plugin source is not a directory: ${source}`);
+  if (destination === source || destination.startsWith(`${source}/`)) throw new Error('destination must not be inside the plugin source');
+  assertSafeTree(source);
+  mkdirSync(destination, { recursive: true });
+  if (readdirSync(destination).length !== 0) throw new Error(`Hermes projection destination must be empty: ${destination}`);
+  const stage = mkdtempSync(join(destination, '.plgnz-hermes-stage-'));
+  try {
+    cpSync(source, stage, { recursive: true });
+    const commands = discoverCommands(source);
+    validateClaudeNativeSemantics(source, commands);
+    const pluginId = readPackageName(source);
+    const skills = projectHermesSkills(stage);
+    if (commands.length > 0 || skills.length > 0) {
+      if (companionDir === undefined) throw new Error('Hermes skills and prompt commands require a native companion destination');
+      writeHermesCommandCompanion(companionDir, pluginId, commands, skills);
+    }
+    publishStage(stage, destination);
+  } catch (error) {
+    rmSync(stage, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function writeHermesCommandCompanion(destinationDir: string, pluginId: string, commands: Command[], skills: HermesSkill[]): void {
+  const destination = resolve(destinationDir);
+  mkdirSync(destination, { recursive: true });
+  if (readdirSync(destination).length !== 0) throw new Error(`Hermes companion destination must be empty: ${destination}`);
+  for (const command of commands) {
+    if (command.userInvocable === false) throw new Error(`Hermes cannot preserve user-invocable: false for prompt command: ${command.source}`);
+    if (command.allowImplicit) throw new Error(`Hermes cannot preserve model-invocable prompt command policy: ${command.source}`);
+  }
+  const companionId = hermesCommandCompanionId(pluginId);
+  const commandNames = new Set(commands.map(command => command.name));
+  const bridged = [...commands.map(command => ({ ...command,
+    name: `${pluginId}:${command.name}`,
+    body: command.body.replace(/(^|[^A-Za-z0-9_-])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,:;!?])/giu, (whole, prefix: string, name: string) => commandNames.has(name) ? `${prefix}/${pluginId}:${name}` : whole),
+  })), ...skills.filter(skill => skill.userOnly).map(skill => ({
+    name: `${pluginId}:${skill.name}`,
+    description: `User-only skill: ${skill.description}`,
+    argumentHint: '[arguments]', userInvocable: true, allowImplicit: false,
+    body: `Read and follow the user-invoked skill at .plgnz-user-skills/${skill.name}/SKILL.md relative to the plugin root above. Treat it as the governing instructions for this turn. User arguments: $ARGUMENTS`,
+    source: `${pluginId}/skills/${skill.name}/SKILL.md`,
+  }))];
+  if (new Set(bridged.map(command => command.name)).size !== bridged.length) throw new Error(`Hermes command projection collides in ${pluginId}`);
+  const rows = bridged.map(command => `    (${JSON.stringify(command.name)}, ${JSON.stringify(command.description)}, ${JSON.stringify(command.argumentHint ?? '')}, ${JSON.stringify(command.body)}),`).join('\n');
+  const ordinary = skills.filter(skill => !skill.userOnly);
+  const skillRows = ordinary.map(skill => `        (${JSON.stringify(skill.name)}, ${JSON.stringify(skill.description)}),`).join('\n');
+  writeFileSync(join(destination, 'plugin.yaml'), `name: ${companionId}\nversion: 1\ndescription: Native prompt-command bridge for ${pluginId}\nrequires_plugins:\n  - ${pluginId}\n`);
+  writeFileSync(join(destination, '__init__.py'), `"""Generated by plgnz. Queues portable prompt commands into the interactive Hermes CLI."""\nfrom pathlib import Path\nimport re\nimport shlex\n\n_COMMANDS = [\n${rows}\n]\n\ndef _expand(template, raw_args):\n    raw = raw_args or ""\n    try:\n        parts = shlex.split(raw)\n    except ValueError:\n        parts = raw.split()\n    def replacement(match):\n        if match.group(0) == "$ARGUMENTS":\n            return raw\n        index = int(match.group(1) or match.group(2))\n        return parts[index - 1] if 0 < index <= len(parts) else ""\n    return re.sub(r"\\$ARGUMENTS\\b|\\$(?:\\{([0-9]+)\\}|([0-9]+))", replacement, template)\n\ndef _handler(ctx, template):\n    def run(raw_args):\n        plugin_root = Path(__file__).resolve().parent.parent / ${JSON.stringify(pluginId)}\n        prompt = _expand(template, raw_args)\n        prompt = (f"Plugin root: {plugin_root}\\n"
+            "Resolve relative skill, agent, and reference paths from that plugin root.\\n\\n" + prompt)\n        if not ctx.inject_message(prompt):\n            return "Unsupported outside an interactive Hermes CLI session; no model turn was started."\n        return None\n    return run\n\ndef register(ctx):\n    for name, description, args_hint, template in _COMMANDS:\n        ctx.register_command(name, _handler(ctx, template), description=description, args_hint=args_hint)\n`);
+  if (ordinary.length > 0) {
+    const init = join(destination, '__init__.py');
+    writeFileSync(init, `${readFileSync(init, 'utf8')}    import hashlib\n    plugin_id = ${JSON.stringify(pluginId)}\n    slug = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "_-") else "-" for ch in plugin_id.lower()).strip("-_") or "plugin"\n    namespace = f"agent-plugin-{slug}-{hashlib.sha256(plugin_id.encode()).hexdigest()[:8]}"\n    skills = [\n${skillRows}\n    ]\n    lines = "\\n".join(f"- {namespace}:{name}: {description}" for name, description in skills)\n    section = ${JSON.stringify(`Portable skills from ${pluginId} are available through Hermes skill tools:\n`)} + lines + ${JSON.stringify('\nUse skill_view with the exact qualified name when a listed skill matches the task.')}\n    ctx.register_system_prompt_section(${JSON.stringify(`${companionId}.skills`)}, section, position="after_memory")\n`);
+  }
+}
+
+function projectHermesSkills(stage: string): HermesSkill[] {
+  const root = join(stage, 'skills');
+  if (!existsSync(root)) return [];
+  const result = readdirSync(root).sort().flatMap(entry => {
+    const skill = join(root, entry, 'SKILL.md');
+    if (!existsSync(skill)) return [];
+    const match = readFileSync(skill, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (match === null) return [];
+    const metadata = parseYaml(match[1] ?? '', skill);
+    return typeof metadata['description'] === 'string' ? [{ name: entry, description: metadata['description'], userOnly: hermesSkillUserOnly(skill, metadata) }] : [];
+  });
+  const userOnly = result.filter(skill => skill.userOnly);
+  if (userOnly.length > 0) {
+    const privateRoot = join(stage, '.plgnz-user-skills');
+    cpSync(root, privateRoot, { recursive: true });
+    for (const skill of userOnly) rmSync(join(root, skill.name), { recursive: true });
+  }
+  for (const skill of result.filter(item => !item.userOnly)) stripOrdinaryHermesPolicy(join(root, skill.name, 'SKILL.md'));
+  return result;
 }
 
 function validateClaudeNativeSemantics(source: string, commands: Command[]): void {
@@ -306,6 +396,35 @@ function writeCommandSkill(stage: string, command: Command, namespace: string, c
   mkdirSync(join(skillDir, 'agents'), { recursive: true });
   writeFileSync(join(skillDir, 'SKILL.md'), `---\nname: ${command.name}\ndescription: ${yamlString(command.description)}\n${hint}${userInvocable}disable-model-invocation: ${!command.allowImplicit}\n---\n\n${preface}${body}`);
   writePolicy(join(skillDir, 'agents', 'openai.yaml'), command.allowImplicit);
+}
+
+function hermesSkillUserOnly(skill: string, metadata: Record<string, unknown>): boolean {
+  const value = (hyphen: string, underscore: string): unknown => {
+    if (metadata[hyphen] !== undefined && metadata[underscore] !== undefined) throw new Error(`conflicting Hermes skill invocation policy spellings: ${skill}`);
+    return metadata[hyphen] ?? metadata[underscore];
+  };
+  const disable = value('disable-model-invocation', 'disable_model_invocation');
+  const user = value('user-invocable', 'user_invocable');
+  if (disable !== undefined && typeof disable !== 'boolean') throw new Error(`invalid Hermes skill invocation policy: ${skill}`);
+  if (user !== undefined && typeof user !== 'boolean') throw new Error(`invalid Hermes skill invocation policy: ${skill}`);
+  if (user === false) throw new Error(`Hermes cannot preserve user-invocable: false: ${skill}`);
+  const sidecar = join(dirname(skill), 'agents', 'openai.yaml');
+  const implicit = existsSync(sidecar) ? readImplicitPolicy(sidecar) : undefined;
+  if (disable !== undefined && implicit !== undefined && implicit !== !disable) throw new Error(`conflicting invocation policy for Hermes skill ${skill}`);
+  const userOnly = disable === true || implicit === false;
+  return userOnly;
+}
+
+function stripOrdinaryHermesPolicy(skill: string): void {
+  const raw = readFileSync(skill, 'utf8');
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (match === null) throw new Error(`Hermes skill frontmatter is required: ${skill}`);
+  const metadata = parseYaml(match[1] ?? '', skill);
+  let changed = false;
+  for (const key of ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable']) {
+    if (metadata[key] !== undefined) { delete metadata[key]; changed = true; }
+  }
+  if (changed) writeFileSync(skill, `---\n${Bun.YAML.stringify(metadata).trimEnd()}\n---${raw.slice(match[0].length)}`);
 }
 
 function translateNativeSkillPolicies(stage: string): void {

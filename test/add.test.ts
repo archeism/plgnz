@@ -23,6 +23,11 @@ const pluginsMap = {
   'mcp.json': JSON.stringify({ mcpServers: { demo: { command: "demo" } } }, null, 2)
 };
 
+const hermesPluginsMap = {
+  'plugin.json': JSON.stringify({ $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', name: 'new-plugin', version: '1.0.0' }, null, 2),
+  'mcp.json': JSON.stringify({ $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json', mcpServers: { demo: { type: 'stdio', command: 'demo' } } }, null, 2),
+};
+
 describe('add', () => {
   test('claude-code > writes registry and copies files', async () => {
     await withHostEnvAsync('claude-code', async (home) => {
@@ -391,25 +396,27 @@ describe('add', () => {
     });
   });
 
-  test('reports a declared target with no active adapter as unverified without mutation', async () => {
-    await withHostEnvAsync('codex', async () => {
+  test('installs through the active Hermes native adapter', async () => {
+    await withHostEnvAsync('codex', async (home) => {
+      mkdirSync(join(home, '.hermes'), { recursive: true });
+      writeFileSync(join(home, '.hermes', 'config.yaml'), 'model: fixture\n');
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
-      initGitRepo(sourceDir, pluginsMap);
+      initGitRepo(sourceDir, hermesPluginsMap);
       const output: string[] = [];
       const originalLog = console.log;
       console.log = (value: string) => output.push(value);
       try {
-        expect(await main(['add', sourceDir, '--target', 'hermes', '--json'])).toBe(1);
+        expect(await main(['add', sourceDir, '--target', 'hermes', '--json'])).toBe(0);
       } finally { console.log = originalLog; }
       const outcomes = JSON.parse(output.join('')) as Array<{ plugin: string; target: string; status: string; action: string; dryRun: boolean; diagnostic?: string }>;
       expect(outcomes).toHaveLength(1);
       expect(outcomes[0]?.plugin).toBe('new-plugin');
       expect(outcomes[0]?.target).toBe('hermes');
-      expect(outcomes[0]?.status).toBe('unverified');
+      expect(outcomes[0]?.status).toBe('installed');
       expect(outcomes[0]?.action).toBe('install');
       expect(outcomes[0]?.dryRun).toBe(false);
-      expect(outcomes[0]?.diagnostic).toContain('unverified for install');
-      expect(readState()).toEqual([]);
+      expect(outcomes[0]?.diagnostic).toBeUndefined();
+      expect(readState().find(record => record.host === 'hermes') !== undefined).toBe(true);
       expect(codex.listInstalled().find((plugin) => plugin.name === 'new-plugin')).toBeUndefined();
     });
   });
@@ -437,21 +444,22 @@ describe('add', () => {
     });
   });
 
-  test('does not start a supported target when another selected target is unverified', async () => {
-    await withHostEnvAsync('codex', async () => {
+  test('installs Codex and Hermes together when both native adapters are selected', async () => {
+    await withHostEnvAsync('codex', async (home) => {
+      mkdirSync(join(home, '.hermes', 'plugins'), { recursive: true });
       const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-source-'));
-      initGitRepo(sourceDir, pluginsMap);
+      initGitRepo(sourceDir, hermesPluginsMap);
       const output: string[] = [];
       const originalLog = console.log;
       console.log = (value: string) => output.push(value);
       try {
-        expect(await main(['add', sourceDir, '--target', 'codex', '--target', 'hermes', '--json'])).toBe(1);
+        expect(await main(['add', sourceDir, '--target', 'codex', '--target', 'hermes', '--json'])).toBe(0);
       } finally { console.log = originalLog; }
       const outcomes = JSON.parse(output.join('')) as Array<{ target: string; status: string }>;
-      expect(outcomes.find((outcome) => outcome.target === 'hermes')?.status).toBe('unverified');
-      expect(outcomes.find((outcome) => outcome.target === 'codex')?.status).toBe('failed');
-      expect(readState()).toEqual([]);
-      expect(codex.listInstalled().find((plugin) => plugin.name === 'new-plugin')).toBeUndefined();
+      expect(outcomes.find((outcome) => outcome.target === 'hermes')?.status).toBe('installed');
+      expect(outcomes.find((outcome) => outcome.target === 'codex')?.status).toBe('installed');
+      expect(readState()).toHaveLength(2);
+      expect(codex.listInstalled().find((plugin) => plugin.name === 'new-plugin') !== undefined).toBe(true);
     });
   });
 

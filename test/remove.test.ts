@@ -11,6 +11,7 @@ import { kimi } from '../src/hosts/kimi';
 import { omp } from '../src/hosts/omp';
 import { pi } from '../src/hosts/pi';
 import { piWriter } from '../src/hosts/pi-writer';
+import { hermes } from '../src/hosts/hermes';
 import { readState } from '../src/state';
 import { withKimiNative } from './kimi-fixture';
 
@@ -58,6 +59,25 @@ describe('remove', () => {
       expect(pi.listInstalled().some((plugin) => plugin.id === 'demo@market')).toBe(false);
       expect(existsSync(join(home, '.pi', 'agent', 'skills', 'market___demo'))).toBe(false);
       expect(readState().find((record) => record.host === 'pi')).toBeUndefined();
+    });
+  });
+
+  test('removes a marketplace-qualified Hermes install through the public route', async () => {
+    await withHostEnvAsync('codex', async (home) => {
+      writeFiles(home, { '.hermes/config.yaml': '', '.hermes/plugins/.keep': '' });
+      const sourceDir = mkdtempSync(join(tmpdir(), 'open-plugin-hermes-marketplace-'));
+      initGitRepo(sourceDir, {
+        '.claude-plugin/marketplace.json': JSON.stringify({ name: 'personal', plugins: [{ source: 'plugins/demo-plugin' }] }),
+        'plugins/demo-plugin/plugin.json': JSON.stringify({ $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', name: 'demo-plugin', version: '1.0.0' }),
+        'plugins/demo-plugin/commands/run.toml': 'description = "Run"\nprompt = "body $ARGUMENTS"\n',
+      });
+      expect(await main(['add', sourceDir, '--target', 'hermes'])).toBe(0);
+      expect(hermes.listInstalled().some((plugin) => plugin.id === 'demo-plugin@personal')).toBe(true);
+
+      expect(await main(['remove', 'demo-plugin@personal', '--target', 'hermes'])).toBe(0);
+      expect(hermes.listInstalled().some((plugin) => plugin.name === 'demo-plugin')).toBe(false);
+      expect(existsSync(join(home, '.hermes/plugins/demo-plugin.plgnz-commands'))).toBe(false);
+      expect(readState().find((record) => record.host === 'hermes')).toBeUndefined();
     });
   });
 

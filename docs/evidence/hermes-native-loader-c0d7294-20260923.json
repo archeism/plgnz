@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-23",
+  "scope": "Isolated current-source native loader and CLI input-queue verification; no model turn, network request, user home, live Hermes profile, or canonical source tree was modified.",
+  "hermes_source": {
+    "path": "/Users/chaz/workspace/learning/agents/hermes-agent",
+    "revision": "c0d7294769a38c17ceae51d8f7995e66e1dcae27",
+    "tracked_status": "clean"
+  },
+  "adapter_candidate": {
+    "path": "/private/tmp/plgnz-hermes-issue15",
+    "base_revision": "722a276b6d9042d2d7cbea457925a7539d77e53d"
+  },
+  "command": "HERMES_SOURCE_ROOT=/Users/chaz/workspace/learning/agents/hermes-agent bun test test/hermes-native-loader.test.ts",
+  "isolation": {
+    "home": "fresh temporary directory",
+    "cwd": "separate empty temporary directory",
+    "hermes_home": "fresh temporary profile with config.yaml symlink",
+    "cleared_environment": [
+      "HERMES_CONFIG_PATH",
+      "HERMES_PROFILE",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME",
+      "XDG_CACHE_HOME",
+      "XDG_STATE_HOME",
+      "XDG_RUNTIME_DIR"
+    ],
+    "pythonpath": "explicit Hermes source path"
+  },
+  "acceptance": {
+    "native_discover_and_load": true,
+    "ordinary_skill_registered": true,
+    "ordinary_skill_catalog_prompt_section_registered": true,
+    "user_only_skill_excluded_from_ordinary_discovery": true,
+    "namespaced_prompt_command_registered": true,
+    "namespaced_user_only_command_registered": true,
+    "successful_handlers_return_none": true,
+    "pending_input_received_exact_prompt": true,
+    "arguments_and_positional_placeholders_expanded_once": true,
+    "raw_argument_containing_dollar_one_preserved": true,
+    "model_turn_started": false
+  },
+  "result": {
+    "passed": 1,
+    "failed": 0,
+    "assertions": 10
+  }
+}

@@ -43,6 +43,16 @@ export function ompRoot(): string {
   return process.env['OPEN_PLUGIN_OMP_ROOT'] ?? join(homeRoot(), '.omp');
 }
 
+/** Hermes's native plugin home. Portable packages live under `plugins/`. */
+export function hermesRoot(): string {
+  return process.env['OPEN_PLUGIN_HERMES_ROOT'] ?? join(homeRoot(), '.hermes');
+}
+
+/** Requested config path; writer verifies native HERMES_HOME/config.yaml resolves to it. */
+export function hermesConfigPath(): string {
+  return process.env['OPEN_PLUGIN_HERMES_CONFIG_PATH'] ?? join(hermesRoot(), 'config.yaml');
+}
+
 /** Official ZCode CLI config and plugin root (`~/.zcode/cli`). */
 export function zcodeCliRoot(): string {
   return join(zcodeStorageRoot(), 'cli');
