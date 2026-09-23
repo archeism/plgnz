@@ -78,3 +78,29 @@ Claude's native cache and progressed through the Claude phase. The existing
 The overall retry then stopped in Personal's Codex content-health consumer,
 which incorrectly treated unrelated host-wide doctor failures as failure of the
 selected plugin. This is separate from Claude installation success.
+
+## Final live deployment outcome
+
+With plgnz `74ce84f` installed locally and Personal `6d6578a`, the unmodified
+`personal deploy` command exited **0**. It reported all local plugin phases and
+managed-banner checks successful. Native readback found eight `eval-skills`
+skills in Claude Code (enabled), Codex (enabled), and Cursor (installed; activation
+is not claimed by the Cursor reader). Claude's own `plugin list --json` also
+confirmed `eval-skills@personal` enabled. The existing native marketplace source
+and unrelated `CLAUDE.md` symlink were preserved.
+
+Additional migration fixes surfaced by the live retries:
+- Personal evaluates the requested plugin's content findings, rather than using
+  unrelated host-wide doctor failures as that plugin's health verdict.
+- The old Vercel Codex-only build suffix was normalized in source. Explicit legacy
+  adoption permits build-metadata-only native differences only with an exact
+  cached canonical identity; replacement remains staged.
+- Personal rejects legacy bare Kimi `0.x` versions, matching plgnz's native-plugin
+  compatibility check. No Kimi upgrade was performed.
+
+Final verification: plgnz type-check + 216 tests / 901 assertions; Personal's
+focused real-public-client distribution suite 26 tests / 98 assertions. Personal's
+aggregate source check still reports the pre-existing untracked `typesafe-ai`
+metadata/banner issue; that content was left untouched. Full deployment success
+is distinct from that source validation result. No npm release or remote fleet
+rollout was performed; paused Grok/ZCode adapter edits remain uncommitted.
