@@ -85,6 +85,36 @@
         "uninstall removes the demo record from plugins list"
       ],
       "meaning": "Official marketplace install, successful update, and removal all work under an isolated store."
+    },
+    {
+      "home": "/tmp/plgnz-zcode-readd-WtC1Nv",
+      "fixture": "directory marketplace readd containing demo 1.0.0",
+      "commands": ["plugins install demo@readd", "plugins install demo@readd", "plugins list --json"],
+      "observed": [
+        "both installs print Installed plugin demo@readd (1.0.0) [enabled]",
+        "installed_plugins.json has exactly one demo@readd record, whose updatedAt changes on the second install"
+      ],
+      "meaning": "Re-adding an already installed exact id refreshes the one native record; it does not create a duplicate record."
+    },
+    {
+      "home": "/tmp/plgnz-zcode-same-version-UTDPxF",
+      "fixture": "directory marketplace same-version containing demo 1.0.0",
+      "commands": ["plugins install demo@same-version", "change only SKILL.md bytes", "plugins marketplace update same-version", "plugins update demo@same-version"],
+      "observed": [
+        "update prints Plugin demo@same-version is already up to date (1.0.0)",
+        "the active cache SKILL.md nevertheless changes from one to two"
+      ],
+      "meaning": "Same-version update is not byte-immutable. The adapter needs its existing synthetic canonical+plgnz.<fingerprint> version representation to make native cache/version state identify projected content."
+    },
+    {
+      "home": "/tmp/plgnz-zcode-buildmeta-ng80w7",
+      "fixture": "directory marketplace buildmeta containing demo 1.0.0+plgnz.0123456789abcdef",
+      "commands": ["plugins install demo@buildmeta", "plugins list --json"],
+      "observed": [
+        "install and native list preserve 1.0.0+plgnz.0123456789abcdef as the version",
+        "the cache directory is 1.0.0-plgnz.0123456789abcdef"
+      ],
+      "meaning": "The official CLI accepts the canonical build-metadata representation, but normalizes + to - in its cache path. An adapter must read reported rootPath instead of deriving a cache path."
     }
   ],
   "safety": "Every probe used a temporary HOME and ZCODE_STORAGE_DIR, ran no model prompt, and printed no credentials."

@@ -1,0 +1,58 @@
+Official ZCode CLI captured-output excerpts, 2026-09-23
+Source: zai-org/ZCode 872ad960de7ec172591f7e1952f7849229f94521
+Built terminal bundle: m1:/tmp/plgnz-zcode-official-VI76GL/source/apps/zcode-cli/packages/cli/dist/zcode.cjs
+All HOME and ZCODE_STORAGE_DIR values below were temporary. No model request ran.
+
+$ node dist/zcode.cjs --version
+0.16.9
+
+$ node dist/zcode.cjs doctor --json
+{
+  "cli": {"name":"zcode","processName":"zcode-cli","version":"0.16.9"},
+  "runtime": {"arch":"arm64","platform":"darwin","sea":false},
+  "packaging": {"default":"node-bundle","sea":"optional"}
+}
+
+$ node dist/zcode.cjs commands inspect report --json
+{
+  "command": {
+    "content": "Read [the report](/tmp/plgnz-zcode-uos-dpY0I6/plgnz-resources/demo/fp/HTML-REPORT.md) before acting.\n$ARGUMENTS",
+    "metadata": {
+      "description": "Report",
+      "name": "report",
+      "scope": "user",
+      "source": "plugin",
+      "argumentHint": "[topic]"
+    }
+  },
+  "diagnostics": []
+}
+
+$ node dist/zcode.cjs plugins update demo@failure-market
+exit 1
+Failed to update plugin demo@failure-market
+- [error] demo@failure-market plugin_marketplace_invalid: Unsupported or missing plugin source: ./plugins/missing
+
+Captured survivor fields after that command (installed_plugins.json record):
+{"id":"demo@failure-market","version":"1.0.0","installPath":".../plugins/cache/failure-market/demo/1.0.0","scope":"user"}
+plugins list still reported the same id enabled.
+
+$ node dist/zcode.cjs plugins update demo@same-version
+Plugin demo@same-version is already up to date (1.0.0).
+
+The active cache skill file after the command:
+two
+
+$ node dist/zcode.cjs plugins install demo@buildmeta
+Installed plugin demo@buildmeta (1.0.0+plgnz.0123456789abcdef) [enabled]
+
+Native list version: 1.0.0+plgnz.0123456789abcdef
+Native reported rootPath suffix: cache/buildmeta/demo/1.0.0-plgnz.0123456789abcdef
+
+$ node dist/zcode.cjs plugins install demo@readd
+Installed plugin demo@readd (1.0.0) [enabled]
+
+$ node dist/zcode.cjs plugins install demo@readd
+Installed plugin demo@readd (1.0.0) [enabled]
+
+installed_plugins.json contains one demo@readd record after the second command.
