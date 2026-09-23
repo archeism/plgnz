@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "target": {
+    "repository": "https://github.com/zai-org/ZCode",
+    "commit": "872ad960de7ec172591f7e1952f7849229f94521",
+    "sourcePath": "/tmp/plgnz-zcode-official-ezY3iN/source",
+    "builtPath": "m1:/tmp/plgnz-zcode-official-VI76GL/source/apps/zcode-cli/packages/cli/dist/zcode.cjs"
+  },
+  "build": {
+    "command": "pnpm build (cwd apps/zcode-cli, PATH prefixed with the isolated root pnpm turbo)",
+    "result": "success; 16 app workspace tasks",
+    "runtime": "m1 darwin/arm64 Node v26.7.0",
+    "declaredNode": "apps/zcode-cli package engines.node is 24.14.0",
+    "limitation": "The source build ran on a newer Node than declared; this proves the observed interface but is not a supported-runtime certification."
+  },
+  "identity": {
+    "command": "node dist/zcode.cjs --version",
+    "stdout": "0.16.9",
+    "doctorJson": {
+      "cli": { "name": "zcode", "processName": "zcode-cli", "version": "0.16.9" },
+      "runtime": { "sea": false },
+      "packaging": { "default": "node-bundle", "sea": "optional" }
+    },
+    "communityExclusion": "The historical community banner zcode-app-cli ... / zcode-runtime ... is not emitted by this official CLI and must be rejected. A bare PATH zcode or version number alone does not prove source provenance.",
+    "distributionBoundary": "The root build script creates a separate zcode-runtime package for the unified Web runtime. Its runner serves --web/serve and is not this terminal CLI."
+  },
+  "documentedPluginSurface": {
+    "config": "~/.zcode/cli/config.json plugins.enabled plus plugins.dirs; configured local directories are enabled inline plugins.",
+    "nativeStorage": "~/.zcode/cli/plugins/{installed_plugins.json,known_marketplaces.json,cache,data,marketplaces}",
+    "verbs": [
+      "plugins list [--json] [--available]",
+      "plugins install <plugin>@<marketplace> [-s <scope>]",
+      "plugins uninstall <plugin> [-s <scope>] [--keep-data] [--force]",
+      "plugins enable|disable|update|validate",
+      "plugins marketplace add|list|remove|update"
+    ]
+  },
+  "isolatedProbes": [
+    {
+      "home": "/tmp/plgnz-zcode-official-home-rVSnct",
+      "environment": ["HOME=<home>", "ZCODE_STORAGE_DIR=<home>/.zcode"],
+      "fixture": "one local plugins.dirs plugin with ordinary and disable-model-invocation skills plus one command",
+      "commands": ["plugins list --json", "skills list --json", "commands list --json"],
+      "observed": [
+        "plugins list reports demo@inline, source inline, rootPath equal to the configured plugin directory, enabled true",
+        "skills list reports both ordinary and disable-model-invocation report skills",
+        "commands list reports report and preserves argument-hint"
+      ],
+      "meaning": "The official skill loader does not enforce user-only semantics from disable-model-invocation; an adapter must omit a UOS skill from skills and represent it only as a command."
+    },
+    {
+      "home": "/tmp/plgnz-zcode-uos-dpY0I6",
+      "fixture": "ordinary skill plus one projected report command with an absolute link to a stable owned resource",
+      "commands": ["skills list --json", "commands inspect report --json"],
+      "observed": [
+        "report has zero skill-list matches while ordinary has one",
+        "commands inspect returns the exact absolute Markdown target and $ARGUMENTS body",
+        "commands inspect preserves description Report and argumentHint [topic]"
+      ],
+      "meaning": "One UOS-to-command representation with an absolute owned resource target is loader-visible without a model turn."
+    },
+    {
+      "home": "/tmp/plgnz-zcode-market-failure-YijwNn",
+      "fixture": "directory marketplace failure-market containing demo 1.0.0",
+      "commands": [
+        "plugins marketplace add <market>",
+        "plugins install demo@failure-market",
+        "replace marketplace source with ./plugins/missing",
+        "plugins marketplace update failure-market",
+        "plugins update demo@failure-market"
+      ],
+      "observed": [
+        "install reports demo@failure-market 1.0.0 enabled",
+        "plugins update exits 1 with plugin_marketplace_invalid: Unsupported or missing plugin source: ./plugins/missing",
+        "installed_plugins.json still selects demo@failure-market 1.0.0 at cache/failure-market/demo/1.0.0 and plugins list still reports it enabled"
+      ],
+      "meaning": "On this official build, the actual malformed-source update failure preserves the prior active record and cache."
+    },
+    {
+      "home": "/tmp/plgnz-zcode-market-pfqSvQ",
+      "fixture": "directory marketplace owned-market containing demo",
+      "commands": ["plugins install demo@owned-market", "change manifest 1.0.0 to 1.0.1", "plugins marketplace update owned-market", "plugins update demo@owned-market", "plugins uninstall demo@owned-market --force"],
+      "observed": [
+        "update reports 1.0.0 to 1.0.1 and plugins list rootPath changes to cache/owned-market/demo/1.0.1",
+        "uninstall removes the demo record from plugins list"
+      ],
+      "meaning": "Official marketplace install, successful update, and removal all work under an isolated store."
+    }
+  ],
+  "safety": "Every probe used a temporary HOME and ZCODE_STORAGE_DIR, ran no model prompt, and printed no credentials."
+}

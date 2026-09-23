@@ -38,7 +38,7 @@ npx plgnz doctor --target codex --json
 
 ## Compatibility and lifecycle requirements
 
-1. A consumer profile identifies harness, surface/loader, applicable versions, capabilities and evidence. CLI, desktop and ACP are not assumed equivalent.
+1. A consumer profile identifies harness, surface/loader, applicable versions, capabilities and evidence. CLI, desktop and ACP are not assumed equivalent. The `zcode-cli` target means the official CLI from [`zai-org/ZCode`](https://github.com/zai-org/ZCode), under `apps/zcode-cli/`. The community `kingsword09/zcode-cli` / `zcode-app-cli` wrapper is not this target. Its earlier probes remain historical evidence and cannot establish official CLI compatibility; official CLI and Desktop still require separate runtime evidence.
 2. Accept existing Markdown/TOML prompt commands and skill directories. Preserve explicit invocation restrictions, names, descriptions, supported arguments, sibling references and plugin-owned resources. Commands and user-only skills may map into each other's native form when semantics are equivalent. Ordinary skills retain automatic discovery.
 3. Do not substitute prose for unsupported executable handlers, permission semantics or template preprocessing. Report unsupported or unverified requirements before replacing the affected plugin. Never silently strip user-only restrictions or install a partial dependency set as a success.
 4. Stage and validate each plugin/target before activation. A failed conversion retains its working installation; updates remove obsolete owned representations. Report partial multi-target outcomes honestly; no global transaction is promised.
