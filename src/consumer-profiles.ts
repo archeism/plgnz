@@ -58,7 +58,7 @@ export const consumerProfiles: readonly ConsumerProfile[] = [
   profile('dcode', 'deepagents-code plugin loader', 'docs/evidence/dcode-native-batch2-20260923.md', '0.1.74', { ...active, commandProjection: 'unsupported', userOnlySkills: 'unsupported' }),
   profile('hermes', 'Hermes portable + native directory plugin loaders', 'docs/hosts/hermes.md', 'c0d7294', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   pending('openclaw', 'OpenClaw plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
-  pending('grok', 'Grok Build plugin loader', 'SPEC.md § Compatibility and lifecycle requirements'),
+  profile('grok', 'Grok Build native marketplace loader', 'docs/hosts/grok.md (isolated native lifecycle probe, 2026-09-23)', '1.0.41', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   profile('kimi', 'Kimi Code plugin loader', 'docs/hosts/kimi.md (isolated native probe, 2026-09-22)', '2.0.1', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   profile('zcode-cli', 'Official Z.ai ZCode CLI plugin loader', 'docs/evidence/zcode-official-cli-872ad960-20260923.json', '0.16.9', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   pending('zcode-desktop', 'Z.ai ZCode desktop plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),

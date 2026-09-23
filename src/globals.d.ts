@@ -80,6 +80,7 @@ declare const process: {
   chdir(dir: string): void;
   argv: string[];
   platform: string;
+  execPath: string;
   exitCode?: number;
   exit(code?: number): never;
 };

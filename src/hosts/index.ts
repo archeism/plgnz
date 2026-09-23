@@ -18,7 +18,8 @@ import { omp } from './omp';
 import { pi } from './pi';
 import { dcode } from './dcode';
 import { opencode } from './opencode';
+import { grok } from './grok';
 import { zcodeCli } from './zcode-cli';
 import { hermes } from './hermes';
 
-export const hosts: HostReader[] = [claudeCode, codex, kimi, cursor, omp, hermes, pi, dcode, opencode, zcodeCli];
+export const hosts: HostReader[] = [claudeCode, codex, kimi, cursor, omp, hermes, pi, dcode, opencode, grok, zcodeCli];

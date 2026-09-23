@@ -43,6 +43,11 @@ export function ompRoot(): string {
   return process.env['OPEN_PLUGIN_OMP_ROOT'] ?? join(homeRoot(), '.omp');
 }
 
+/** `~/.grok` — Grok Build's native configuration and installed-plugin store. */
+export function grokRoot(): string {
+  return process.env['OPEN_PLUGIN_GROK_ROOT'] ?? join(homeRoot(), '.grok');
+}
+
 /** Hermes's native plugin home. Portable packages live under `plugins/`. */
 export function hermesRoot(): string {
   return process.env['OPEN_PLUGIN_HERMES_ROOT'] ?? join(homeRoot(), '.hermes');
