@@ -51,3 +51,30 @@ Sol independently reproduced RED against the old installed launcher and GREEN
 against the candidate. Core verification: 209 tests, zero failures; typecheck
 passed. Personal composition: four tests, zero failures, 16 assertions. This
 supersedes the initial claim that the readback consumer had been fully checked.
+
+## Live new-package distribution regressions
+
+Adding `eval-skills` through `personal deploy` exposed two gaps not covered by the
+fresh-home composition:
+
+- The cache preflight recursively scanned unrelated native marketplaces and
+  rejected an existing `CLAUDE.md` symlink in `oh-my-ai-sdk`. The scoped preflight
+  now checks touched path components and selected content only; regression tests
+  preserve the foreign symlink while rejecting redirected cache, metadata,
+  wrapper and root paths, including dangling symlinks.
+- A new member of an already-registered native marketplace must retain that
+  registration when its selected native package and incoming package have
+  identical staged contents. Existing unowned installations still require
+  explicit adoption; differing source contents do not establish this proof.
+
+The first fix passed `bun run check` and all 214 tests (882 assertions) before
+its live retry exposed the second gap. Full deployment success is recorded below
+only after a subsequent real retry, not inferred from these isolated tests.
+
+The combined fix passed `bun run check` and all 215 tests (892 assertions).
+A real `personal deploy` retry installed and enabled `eval-skills@personal` in
+Claude's native cache and progressed through the Claude phase. The existing
+`personal` marketplace registration and unrelated symlink were preserved.
+The overall retry then stopped in Personal's Codex content-health consumer,
+which incorrectly treated unrelated host-wide doctor failures as failure of the
+selected plugin. This is separate from Claude installation success.

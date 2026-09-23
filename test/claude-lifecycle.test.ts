@@ -229,6 +229,66 @@ describe('claude-code lifecycle', () => {
     });
   });
 
+  test('adopts a new byte-identical catalog member without rebinding its native marketplace', async () => {
+    await isolated(async root => {
+      const incoming = fixture({});
+      const catalog = mkdtempSync(join(tmpdir(), 'plgnz-claude-native-catalog-'));
+      try {
+        writeFiles(join(root, 'plugins'), {
+          'installed_plugins.json': JSON.stringify({ version: 2, plugins: {} }),
+          'known_marketplaces.json': JSON.stringify({ personal: { source: { source: 'directory', path: catalog }, installLocation: catalog } }),
+        });
+        writeFiles(catalog, {
+          '.claude-plugin/marketplace.json': JSON.stringify({ name: 'personal', plugins: [
+            { name: 'eval-skills', source: './plugins/eval-skills' },
+          ] }),
+        });
+        const known = join(root, 'plugins/known_marketplaces.json');
+        const before = readFileSync(known, 'utf8');
+        const evalDir = join(incoming.resolved.sourceUri, 'plugins/eval-skills');
+        writeFiles(evalDir, {
+          'plugin.json': '{"name":"eval-skills","version":"0.1.0"}',
+          '.claude-plugin/plugin.json': '{"name":"eval-skills","version":"0.1.0"}',
+        });
+        writeFiles(join(catalog, 'plugins/eval-skills'), {
+          'plugin.json': '{"name":"eval-skills","version":"0.1.0"}',
+          '.claude-plugin/plugin.json': '{"name":"eval-skills","version":"0.1.0"}',
+        });
+        const next: PluginSource = { dir: evalDir, name: 'eval-skills', marketplace: 'personal', contentFingerprint: 'eval' };
+        const resolved: ResolvedSource = { ...incoming.resolved, plugins: [next] };
+        const other: ResolvedSource = { ...resolved, sourceUri: join(catalog, 'other-source') };
+        expect((await failure(() => claudeCodeWriter.add(next, other))).message).toContain('different source');
+        expect(readFileSync(known, 'utf8')).toBe(before);
+
+        const nativeManifest = join(catalog, 'plugins/eval-skills/plugin.json');
+        const nativeClaudeManifest = join(catalog, 'plugins/eval-skills/.claude-plugin/plugin.json');
+        writeFileSync(nativeManifest, '{"name":"eval-skills","version":"0.2.0"}');
+        writeFileSync(nativeClaudeManifest, '{"name":"eval-skills","version":"0.2.0"}');
+        expect((await failure(() => claudeCodeWriter.add(next, resolved))).message).toContain('different source');
+        writeFileSync(nativeManifest, '{"name":"eval-skills","version":"0.1.0"}');
+        writeFileSync(nativeClaudeManifest, '{"name":"eval-skills","version":"0.1.0"}');
+
+        const catalogManifest = join(catalog, '.claude-plugin/marketplace.json');
+        const catalogBefore = readFileSync(catalogManifest, 'utf8');
+        writeFileSync(catalogManifest, '{"name":"personal","plugins":[]}');
+        expect((await failure(() => claudeCodeWriter.add(next, resolved))).message).toContain('different source');
+        writeFileSync(catalogManifest, catalogBefore);
+
+        const target = join(root, 'plugins/cache/personal/eval-skills/0.1.0');
+        writeFiles(target, { 'foreign.txt': 'keep\n' });
+        expect((await failure(() => claudeCodeWriter.add(next, resolved))).message).toContain('unowned');
+        expect(readFileSync(join(target, 'foreign.txt'), 'utf8')).toBe('keep\n');
+        rmSync(target, { recursive: true, force: true });
+
+        await claudeCodeWriter.add(next, resolved);
+        expect(readFileSync(known, 'utf8')).toBe(before);
+        expect(JSON.parse(readFileSync(join(target, '.plgnz-install.json'), 'utf8')).adopted).toBe(true);
+        expect(claudeCode.listInstalled().find(entry => entry.id === 'eval-skills@personal')?.path).toBe(target);
+        expect(existsSync(join(root, 'plugins/marketplaces/.plgnz-personal'))).toBe(false);
+      } finally { rmSync(catalog, { recursive: true, force: true }); }
+    });
+  });
+
   test('refuses adoption when the unmarked user root lacks the selected native identity', async () => {
     await isolated(async root => {
       const incoming = fixture({});

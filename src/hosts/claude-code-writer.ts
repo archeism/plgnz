@@ -31,7 +31,9 @@ export const claudeCodeWriter: HostWriter = {
     const alreadyOwned = hasAdoptedRegistryInstall(registry, id, resolved.sourceUri, slot);
     const legacy = opts?.adoptExisting && !alreadyOwned ? validateLegacyUserInstall(registry, id, slot, plugin) : undefined;
     const owned = ownedRegistryTarget(registry, id, resolved.sourceUri, slot, version);
-    const preserveNativeMarketplace = legacy !== undefined || alreadyOwned;
+    const matchedCatalogMember = legacy === undefined && !alreadyOwned && !hasUserRegistryInstall(registry, id) &&
+      matchesNativeCatalogMember(marketplaces, marketplace, plugin, resolved);
+    const preserveNativeMarketplace = legacy !== undefined || alreadyOwned || matchedCatalogMember;
     const target = owned ??
       (legacy !== undefined && existsSync(join(slot, version)) && readOwnership(join(slot, version)) === null
         ? join(slot, `${version}.plgnz`)
@@ -421,6 +423,66 @@ function hasAdoptedRegistryInstall(registry: Registry, id: string, source: strin
   if (typeof path !== 'string' || dirname(path) !== slot || !existsSync(path)) return false;
   const ownership = readOwnership(path);
   return ownership?.pluginId === id && ownership.source === source && ownership.adopted === true;
+}
+
+function hasUserRegistryInstall(registry: Registry, id: string): boolean {
+  const rows = registry.plugins[id];
+  return Array.isArray(rows) && rows.some(row => typeof row === 'object' && row !== null && (row as Record<string, unknown>)['scope'] === 'user');
+}
+
+/** A new member may keep a native catalog only if that catalog delivers identical staged bytes. */
+function matchesNativeCatalogMember(marketplaces: Record<string, unknown>, name: string, plugin: PluginSource, resolved: ResolvedSource): boolean {
+  const registration = marketplaces[name];
+  if (typeof registration !== 'object' || registration === null || Array.isArray(registration)) return false;
+  const record = registration as Record<string, unknown>;
+  const source = record['source'];
+  if (typeof source !== 'object' || source === null || Array.isArray(source)) return false;
+  const sourceRecord = source as Record<string, unknown>;
+  const catalog = sourceRecord['path'];
+  if (sourceRecord['source'] !== 'directory' || typeof catalog !== 'string' || catalog !== record['installLocation'] || !catalog.startsWith('/') || catalog === resolved.sourceUri) return false;
+  if (!containedPath(resolved.sourceUri, plugin.dir)) return false;
+  const manifest = join(catalog, '.claude-plugin', 'marketplace.json');
+  if (!existsSync(manifest)) return false;
+  assertCatalogPath(catalog, manifest);
+  let document: unknown;
+  try { document = JSON.parse(readFileSync(manifest, 'utf8')); } catch { return false; }
+  if (typeof document !== 'object' || document === null || Array.isArray(document)) return false;
+  const catalogManifest = document as Record<string, unknown>;
+  if (catalogManifest['name'] !== name || !Array.isArray(catalogManifest['plugins'])) return false;
+  const selected = catalogManifest['plugins'].filter(item => typeof item === 'object' && item !== null && (item as Record<string, unknown>)['name'] === plugin.name);
+  if (selected.length !== 1) return false;
+  const memberSource = (selected[0] as Record<string, unknown>)['source'];
+  if (typeof memberSource !== 'string' || !memberSource.startsWith('./')) return false;
+  const nativeDir = resolve(catalog, memberSource);
+  if (!containedPath(catalog, nativeDir) || nativeDir === resolve(catalog)) return false;
+  assertCatalogPath(catalog, nativeDir);
+  if (!existsSync(nativeDir) || !lstatSync(nativeDir).isDirectory()) return false;
+  const stages = mkdtempSync(join(tmpdir(), 'plgnz-claude-catalog-proof-'));
+  try {
+    const incoming = join(stages, 'incoming');
+    const native = join(stages, 'native');
+    stagePlugin(plugin.dir, incoming, plugin.name, resolved.sha);
+    stagePlugin(nativeDir, native, plugin.name, resolved.sha);
+    return sameTree(incoming, native);
+  } finally { rmSync(stages, { recursive: true, force: true }); }
+}
+
+function containedPath(root: string, path: string): boolean {
+  if (!root.startsWith('/') || !path.startsWith('/')) return false;
+  const suffix = relative(resolve(root), resolve(path));
+  return suffix !== '..' && !suffix.startsWith('../') && !suffix.startsWith('..\\');
+}
+
+function assertCatalogPath(root: string, path: string): void {
+  if (!containedPath(root, path)) throw new Error(`Claude Code native catalog member escapes catalog: ${path}`);
+  const target = resolve(path);
+  let current = resolve(root);
+  for (const part of ['', ...relative(current, target).split('/').filter(Boolean)]) {
+    if (part !== '') current = join(current, part);
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`Claude Code native catalog path contains symlink: ${current}`);
+    if (current !== target && !stat.isDirectory()) throw new Error(`Claude Code native catalog path is not a directory: ${current}`);
+  }
 }
 
 function assertTargetIsReplaceable(target: string, ownership: Ownership | null, id: string, source: string): void {
