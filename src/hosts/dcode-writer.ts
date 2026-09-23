@@ -103,6 +103,7 @@ function stagePlugin(source: string, stage: string, name: string): string | unde
   return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : undefined;
 }
 function requireDcodeCapability(capability: 'commandProjection' | 'userOnlySkills'): void {
+  // TODO(2026-09-23): support user-only skills when native non-experimental semantics exist; DEEPAGENTS_CODE_EXPERIMENTAL middleware is intentionally deferred.
   const profile = findConsumerProfile('dcode');
   if (profile === undefined) throw new Error('dcode consumer profile is missing');
   requireCompatible(profile, capability);
