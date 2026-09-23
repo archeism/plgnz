@@ -19,9 +19,13 @@ roll the swap back; cleanup after metadata commit does not undo the active
 copy. Removal only handles marker-owned records.
 
 dcode has native-loader evidence for ordinary plugin skills in
-`docs/evidence/dcode-native-loader-20260922.json`. Plugin commands and agents
+`docs/evidence/dcode-native-loader-20260922.json` and a five-package public-CLI
+probe against deepagents-code 0.1.74 in
+`docs/evidence/dcode-native-batch2-20260923.md`. Plugin commands and agents
 are unsupported, and user-only skill invocation is not retained by the loader,
-so the writer rejects those inputs before activation. Hooks and MCP declarations
+so the writer rejects those inputs before activation. The check reads both
+opening `SKILL.md` frontmatter and a Codex `agents/openai.yaml` sidecar with
+`policy.allow_implicit_invocation: false`. Hooks and MCP declarations
 remain in the staged package unchanged; the writer does not translate or drop
 them, and the native inventory accepts root `mcpServers` / `hooks`, `.mcp.json`,
 and `hooks/hooks.json`. Its manifest reader accepts only `plugin.json`,

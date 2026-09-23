@@ -66,12 +66,27 @@ describe('dcode lifecycle', () => {
   test('reads all user-only aliases only from opening YAML frontmatter', async () => {
     await isolated(async root => {
       const first = incoming('first\n'); await dcodeWriter.add(first.plugin, first.resolved); const before = readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8');
-      for (const key of ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable']) {
-        const gated = incoming(); gated.resolved.sourceUri = first.resolved.sourceUri; writeFiles(gated.plugin.dir, { 'skills/a/SKILL.md': `---\nname: a\ndescription: fixture\n"${key}": true\n---\nbody\n` });
+      for (const [key, value] of [['disable-model-invocation', true], ['disable_model_invocation', true], ['user-invocable', false], ['user_invocable', false]] as const) {
+        const gated = incoming(); gated.resolved.sourceUri = first.resolved.sourceUri; writeFiles(gated.plugin.dir, { 'skills/a/SKILL.md': `---\nname: a\ndescription: fixture\n"${key}": ${value}\n---\nbody\n` });
         const failure = await failed(() => dcodeWriter.add(gated.plugin, gated.resolved)); expect(failure instanceof CompatibilityError).toBe(true); expect(failure.message).toContain("target 'dcode' is unsupported for userOnlySkills"); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
       }
+      const ordinary = incoming(); ordinary.resolved.sourceUri = first.resolved.sourceUri; writeFiles(ordinary.plugin.dir, { 'skills/a/SKILL.md': '---\nname: a\ndescription: fixture\ndisable-model-invocation: false\nuser-invocable: true\n---\nbody\n', 'skills/a/agents/openai.yaml': 'policy:\n  allow_implicit_invocation: true\n' });
+      expect(await dcodeWriter.add(ordinary.plugin, ordinary.resolved, { dryRun: true })).toBeUndefined(); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
       const bodyOnly = incoming('---\nname: a\ndescription: fixture\n---\nThe text disable-model-invocation: true is body text.\n'); bodyOnly.resolved.sourceUri = first.resolved.sourceUri;
       expect(await dcodeWriter.add(bodyOnly.plugin, bodyOnly.resolved, { dryRun: true })).toBeUndefined(); expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe(before);
+    });
+  });
+  test('refuses a Codex sidecar that restricts implicit skill invocation', async () => {
+    await isolated(async root => {
+      const first = incoming('first\n'); await dcodeWriter.add(first.plugin, first.resolved);
+      const restricted = incoming('second\n'); restricted.resolved.sourceUri = first.resolved.sourceUri;
+      writeFiles(restricted.plugin.dir, { 'skills/a/agents/openai.yaml': 'policy:\n  allow_implicit_invocation: false\n' });
+      const failure = await failed(() => dcodeWriter.add(restricted.plugin, restricted.resolved));
+      expect(failure instanceof CompatibilityError).toBe(true);
+      expect(failure.message).toContain("target 'dcode' is unsupported for userOnlySkills");
+      writeFiles(restricted.plugin.dir, { 'skills/a/SKILL.md': '---\nname: a\ndescription: fixture\ndisable-model-invocation: false\nuser-invocable: true\n---\nsecond\n' });
+      expect((await failed(() => dcodeWriter.add(restricted.plugin, restricted.resolved))).message).toContain("target 'dcode' is unsupported for userOnlySkills");
+      expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toContain('first');
     });
   });
   test('dry-run preflights identically and writes no active state', async () => {

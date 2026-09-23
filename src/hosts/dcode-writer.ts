@@ -77,7 +77,27 @@ function stagePlugin(source: string, stage: string, name: string): void {
   if (existsSync(join(stage, 'agents')) || existsSync(join(stage, '.claude', 'agents'))) throw new Error('dcode plugin agents are unsupported; refusing to activate');
   for (const skill of skillFiles(stage)) {
     const frontmatter = openingFrontmatter(readFileSync(skill, 'utf8'), skill);
-    if (frontmatter !== undefined && ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable'].some(key => Object.hasOwn(frontmatter, key))) requireDcodeCapability('userOnlySkills');
+    if (frontmatter !== undefined) {
+      for (const key of ['disable-model-invocation', 'disable_model_invocation', 'user-invocable', 'user_invocable']) {
+        if (!Object.hasOwn(frontmatter, key)) continue;
+        const value = frontmatter[key];
+        if (typeof value !== 'boolean') throw new Error(`dcode skill invocation flag ${key} must be boolean: ${skill}`);
+        if (key.startsWith('disable') ? value : !value) requireDcodeCapability('userOnlySkills');
+      }
+    }
+    const sidecar = join(dirname(skill), 'agents', 'openai.yaml');
+    if (existsSync(sidecar)) {
+      let parsed: unknown;
+      try { parsed = Bun.YAML.parse(readFileSync(sidecar, 'utf8')); }
+      catch { throw new Error(`dcode skill invocation sidecar has invalid YAML: ${sidecar}`); }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error(`dcode skill invocation sidecar must be an object: ${sidecar}`);
+      const policy = (parsed as Doc).policy;
+      if (typeof policy === 'object' && policy !== null && !Array.isArray(policy) && Object.hasOwn(policy, 'allow_implicit_invocation')) {
+        const value = (policy as Doc).allow_implicit_invocation;
+        if (typeof value !== 'boolean') throw new Error(`dcode skill invocation sidecar policy must be boolean: ${sidecar}`);
+        if (!value) requireDcodeCapability('userOnlySkills');
+      }
+    }
   }
 }
 function requireDcodeCapability(capability: 'commandProjection' | 'userOnlySkills'): void {

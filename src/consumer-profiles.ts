@@ -55,7 +55,7 @@ export const consumerProfiles: readonly ConsumerProfile[] = [
   profile('claude-code', 'Claude Code plugin loader', 'docs/hosts/claude-code.md', '2.1.275', active),
   profile('codex', 'Codex plugin loader', 'docs/evidence/codex-personal-20260922.json', '0.153.4', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   profile('omp', 'OMP native npm/link extension-package loader', 'docs/evidence/omp-native-extension-package-20260923.json', '18.1.4', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
-  profile('dcode', 'deepagents-code plugin loader', 'docs/evidence/dcode-native-loader-20260922.json', '0.1.71', { ...active, commandProjection: 'unsupported', userOnlySkills: 'unsupported' }),
+  profile('dcode', 'deepagents-code plugin loader', 'docs/evidence/dcode-native-batch2-20260923.md', '0.1.74', { ...active, commandProjection: 'unsupported', userOnlySkills: 'unsupported' }),
   profile('hermes', 'Hermes portable + native directory plugin loaders', 'docs/hosts/hermes.md', 'c0d7294', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   pending('openclaw', 'OpenClaw plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('grok', 'Grok Build plugin loader', 'SPEC.md § Compatibility and lifecycle requirements'),
