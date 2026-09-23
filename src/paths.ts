@@ -8,7 +8,7 @@
  * Resolution order for each host root: a host-specific override env var wins,
  * then `OPEN_PLUGIN_HOME` (a stand-in for `$HOME`), then the real `$HOME`.
  */
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 
 /** The home stand-in: `OPEN_PLUGIN_HOME` when set, else the real `$HOME`. */
@@ -41,6 +41,20 @@ export function cursorRoot(): string {
 /** `~/.omp` — omp home: its own plugin store under `plugins/` (AGENTS.md hosts list). */
 export function ompRoot(): string {
   return process.env['OPEN_PLUGIN_OMP_ROOT'] ?? join(homeRoot(), '.omp');
+}
+
+/** Official ZCode CLI config and plugin root (`~/.zcode/cli`). */
+export function zcodeCliRoot(): string {
+  return join(zcodeStorageRoot(), 'cli');
+}
+
+/** Official ZCode keeps config under HOME while allowing its plugin store to move. */
+export function zcodeCliConfigRoot(): string {
+  return join(homeRoot(), '.zcode', 'cli');
+}
+
+export function zcodeStorageRoot(): string {
+  return process.env['ZCODE_STORAGE_DIR'] ?? dirname(zcodeCliConfigRoot());
 }
 
 /**

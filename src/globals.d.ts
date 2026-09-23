@@ -26,6 +26,7 @@ declare module 'node:fs' {
   export function chmodSync(path: string, mode: number): void;
   export function mkdtempSync(prefix: string): string;
   export function renameSync(oldPath: string, newPath: string): void;
+  export function realpathSync(path: string): string;
   export function symlinkSync(target: string, path: string): void;
   export const constants: { X_OK: number };
 }

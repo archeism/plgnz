@@ -27,18 +27,46 @@ failed-update preservation, and removal probes. It also exposes a
 `disable-model-invocation` skill in its loader-visible skill list. Therefore a
 user-only skill must be represented as a command excluded from skill discovery.
 The tested projection preserves a static resource reference as an absolute owned
-path. It does not establish template preprocessing or argument expansion.
+path. The separate [source probe](../evidence/zcode-official-cli-command-source-probe-872ad960-20260923.json)
+verifies local `$ARGUMENTS`/`$N` expansion; no model session was run.
 
 The isolated build used Node `26.7.0`, while the source declares Node `24.14.0`.
 It establishes observed behavior, not supported-runtime certification.
 
-Public plgnz adapter lifecycle and invocation conformance remain unverified.
-Do not activate the pending adapter until its own complete matrix covers install,
-re-add, changed-content update, failed-update preservation, removal, command
-arguments/resources, and user-only exclusion against this official build.
+The [public adapter evidence](../evidence/zcode-official-public-adapter-20260923.md)
+records the acceptance matrix below. Broader native semantics
+remain unsupported unless explicitly covered by that boundary.
 
 The prior community-wrapper probes and its unregistered adapter draft do not
 satisfy this gate. Preserve useful fixtures, but revalidate every runtime claim.
 Desktop is a separate target; neither CLI source availability nor a CLI pass
 proves Desktop compatibility. Do not replace an existing community executable
 or reuse its live data directory merely to perform these probes.
+
+## Public adapter boundary
+
+The `zcode-cli` adapter requires an explicit
+`OPEN_PLUGIN_ZCODE_CLI_BIN=/absolute/path/to/zcode`. It reads `--version` first
+and rejects the historical `zcode-app-cli` banner, then requires `doctor --json`
+to report CLI name `zcode` and process name `zcode-cli`. A version string alone
+does not prove provenance.
+
+When `ZCODE_STORAGE_DIR` is supplied, the adapter leaves config at
+`$HOME/.zcode/cli` as the official CLI does, and uses
+`$ZCODE_STORAGE_DIR/cli` for the native registry/cache. Without that variable,
+both use the normal `$HOME/.zcode/cli` layout.
+
+The adapter supports static Markdown commands and user-only skills projected as
+one namespaced command (`<plugin>:<command>`) with `$ARGUMENTS`/`$N` preserved
+and contained Markdown resources rewritten to an owned absolute path. It
+refuses shell expansion, unsupported command metadata, unimplemented root
+semantics such as hooks/MCP, command collisions, and unowned adoption. Native
+content uses `canonical+plgnz.<fingerprint>`; cache path normalization is read
+from the native store rather than reconstructed.
+
+The public flow was exercised against the source-built official CLI `0.16.9`
+on darwin/arm64 with Node `26.7.0`: fresh add, read-only list/doctor, verified
+unchanged re-add, changed-content update, drift detection/recovery, and remove.
+All adapter probes used temporary homes and made no model turn. The source
+declares Node `24.14.0`, so this is interface evidence rather than a
+supported-runtime certification.

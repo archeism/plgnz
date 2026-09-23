@@ -60,7 +60,7 @@ export const consumerProfiles: readonly ConsumerProfile[] = [
   pending('openclaw', 'OpenClaw plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   pending('grok', 'Grok Build plugin loader', 'SPEC.md § Compatibility and lifecycle requirements'),
   profile('kimi', 'Kimi Code plugin loader', 'docs/hosts/kimi.md (isolated native probe, 2026-09-22)', '2.0.1', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
-  pending('zcode-cli', 'Z.ai ZCode CLI plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
+  profile('zcode-cli', 'Official Z.ai ZCode CLI plugin loader', 'docs/evidence/zcode-official-cli-872ad960-20260923.json', '0.16.9', { ...active, commandProjection: 'supported', userOnlySkills: 'supported' }),
   pending('zcode-desktop', 'Z.ai ZCode desktop plugin route', 'SPEC.md § Compatibility and lifecycle requirements'),
   profile('cursor', 'Cursor local plugin loader', 'docs/hosts/cursor.md', '2026.09.18-9a7762b', active),
   excludedStandalone('opencode', 'OpenCode standalone skill and command loaders', 'docs/evidence/opencode-native-loader-20260922.json', '1.15.13'),
