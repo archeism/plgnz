@@ -2,6 +2,7 @@ import { test, expect, describe } from 'bun:test';
 import { withHostEnvAsync } from './util';
 import { main } from '../src/cli';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { repoRoot } from './util';
 
@@ -81,6 +82,7 @@ describe('targets', () => {
   test('actual CLI reports its package version as JSON', () => {
     const result = spawnSync('bun', [join(repoRoot, 'bin', 'plgnz.mjs'), '--version', '--json'], { cwd: repoRoot, encoding: 'utf8' });
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ name: 'plgnz', version: '0.0.0' });
+    const { version } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+    expect(JSON.parse(result.stdout)).toEqual({ name: 'plgnz', version });
   });
 });

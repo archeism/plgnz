@@ -3,7 +3,7 @@
 Open-source installer **and doctor** for agent plugins (Agent Plugins / OpenPlugin spec 1.0.0) and MCP configs — Claude Code, Codex, Cursor, Kimi, and more.
 
 ```
-npx plgnz add <marketplace-or-git-url>   # into each host's native plugin store
+npx plgnz add <plugin-dir-or-marketplace-or-git-url>  # native plugin stores
 npx plgnz doctor                          # dead commands, shadowed entries, stale installs
 npx plgnz pin                             # absolute command paths for GUI hosts
 npx plgnz update                          # re-add from the recorded source, re-pin
@@ -18,7 +18,7 @@ tool did not install. Details: `docs/pin-and-update.md`.
 
 Why another tool: `npx plugins` is closed-source and its Cursor target does not install into Cursor; nothing in the ecosystem checks that an installed plugin still *works*. See `docs/research/`.
 
-Status: pre-alpha, scaffolding in progress. Requires Bun on PATH; the CLI runs under Bun.
+The `npx` command requires Node.js/npm and Bun on PATH; the CLI runs under Bun. `add` accepts a local plugin or marketplace directory as well as a Git URL. Native plugin targets currently include Claude Code, Codex, Kimi, Cursor, OMP, Hermes, Grok, DCode, and ZCode CLI. Run `plgnz targets --all` to see supported and unsupported capabilities for each host; standalone skill distribution is outside this CLI's scope.
 
 Published on npm as `plgnz`; source repository: `archeism/plgnz`.
 
