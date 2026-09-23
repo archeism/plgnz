@@ -64,6 +64,17 @@ Before CLI/source/conversion/adapter implementation, inspect the pinned source a
 
 ## Verification and completion
 
+### Current milestone priority (owner update, 2026-09-23)
+
+Finish the remaining required migrations in two batches: **OMP + Hermes**, then
+**Grok Build + dcode**. Already shipped routes retain their acceptance requirements.
+OpenClaw, ZCode Desktop, and Gemini native extension verification are deferred to
+[follow-up #27](https://github.com/archeism/plgnz/issues/27); their existing routes
+remain until proven replacement parity. This deferral narrows this milestone's
+completion gate, not their eventual migration requirements. Standalone exclusions
+remain unchanged. Close each shipped issue with its acceptance evidence; close the
+milestone only after the required routes and final acceptance issue pass.
+
 Existing plgnz gates: `bun run check` and `bun test`. Personal's full gate: `bun run check`; distinguish pre-existing unrelated failures from regressions.
 
 - Public CLI integration tests use isolated homes, not production agent configuration. Local and Git fixtures traverse the same install pipeline.
