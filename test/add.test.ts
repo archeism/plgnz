@@ -177,7 +177,9 @@ describe('add', () => {
         output.length = 0;
         expect(await main(['add', sourceDir, '--target', 'cursor', '--plugin', 'personal', '--adopt-existing', '--json'])).toBe(0);
         const outcomes = JSON.parse(output.join('')) as Array<{ status: string; nativeId: string }>;
-        expect(outcomes.some((outcome) => outcome.status === 'unchanged' && outcome.nativeId === 'personal@personal')).toBe(true);
+        const nativeId = cursor.listInstalled().find((plugin) => plugin.name === 'personal')?.id;
+        expect(nativeId).toBe('personal');
+        expect(outcomes.some((outcome) => outcome.status === 'unchanged' && outcome.nativeId === nativeId)).toBe(true);
 
         writeFileSync(join(sourceDir, 'plugins', 'personal', 'skills', 'skill', 'SKILL.md'), '# Personal v2\n');
         output.length = 0;
@@ -197,7 +199,7 @@ describe('add', () => {
         expect(readState().find((record) => record.host === 'cursor' && record.id === 'personal')?.pending).toBeUndefined();
 
         output.length = 0;
-        expect(await main(['remove', 'personal', '--target', 'cursor', '--json'])).toBe(0);
+        expect(await main(['remove', nativeId!, '--target', 'cursor', '--json'])).toBe(0);
         expect(existsSync(target)).toBe(false);
         expect(readState().find((record) => record.host === 'cursor' && record.id === 'personal')).toBeUndefined();
       } finally {
@@ -392,7 +394,9 @@ describe('add', () => {
       try {
         expect(await main(['add', sourceDir, '--target', 'claude-code', '--adopt-existing', '--json'])).toBe(0);
       } finally { console.log = originalLog; }
-      expect(JSON.parse(output.join(''))).toEqual([{ plugin: 'new-plugin', target: 'claude-code', status: 'unchanged', action: 'install', dryRun: false, nativeId: 'new-plugin' }]);
+      const nativeId = claudeCode.listInstalled().find((plugin) => plugin.name === 'new-plugin')?.id;
+      expect(nativeId).toBe('new-plugin@local');
+      expect(JSON.parse(output.join(''))).toEqual([{ plugin: 'new-plugin', target: 'claude-code', status: 'unchanged', action: 'install', dryRun: false, nativeId }]);
     });
   });
 

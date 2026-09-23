@@ -391,7 +391,7 @@ export async function main(argv: string[]): Promise<number> {
             const finalizedState = state.map((candidate) => candidate === rec ? finalized : candidate);
             writeState(finalizedState);
             state = finalizedState;
-            outcomes.push({ plugin: plugin.name, target: w.id, status: writerResult === 'unchanged' ? 'unchanged' : 'installed', action: 'install', dryRun: false, nativeId });
+            outcomes.push({ plugin: plugin.name, target: w.id, status: writerResult === 'unchanged' ? 'unchanged' : 'installed', action: 'install', dryRun: false, nativeId: match.id });
           }
         }
       }
