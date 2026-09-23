@@ -100,6 +100,41 @@ describe('codex lifecycle', () => {
     });
   });
 
+  test('explicitly adopts a legacy native build suffix only with exact cached canonical identity', async () => {
+    await withHostEnvAsync('codex', async home => {
+      const target = join(home, '.codex/plugins/cache/demo-market/demo-plugin/1.2.0');
+      writeFiles(target, {
+        'plugin.json': '{"name":"demo-plugin","version":"1.2.0"}',
+        '.codex-plugin/plugin.json': '{"name":"demo-plugin","version":"1.2.0+codex.20260920045433"}',
+        'foreign.txt': 'old',
+      });
+      const incoming = source({ 'resources/value.txt': 'new\n' });
+      let refusal: Error | undefined;
+      try { await codexWriter.add(incoming.plugin, incoming.resolved); } catch (error) { refusal = error as Error; }
+      expect(refusal?.message).toContain('--adopt-existing');
+      expect(readFileSync(join(target, 'foreign.txt'), 'utf8')).toBe('old');
+      await codexWriter.add(incoming.plugin, incoming.resolved, { dryRun: true, adoptExisting: true });
+      expect(readFileSync(join(target, 'foreign.txt'), 'utf8')).toBe('old');
+
+      writeFileSync(join(target, 'plugin.json'), '{"name":"demo-plugin","version":"1.3.0"}');
+      let canonicalError: Error | undefined;
+      try { await codexWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true }); } catch (error) { canonicalError = error as Error; }
+      expect(canonicalError?.message).toContain('cached Codex manifest identity');
+      writeFileSync(join(target, 'plugin.json'), '{"name":"demo-plugin","version":"1.2.0"}');
+      writeFileSync(join(target, '.codex-plugin/plugin.json'), '{"name":"demo-plugin","version":"1.2.0+"}');
+      let suffixError: Error | undefined;
+      try { await codexWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true }); } catch (error) { suffixError = error as Error; }
+      expect(suffixError?.message).toContain('cached Codex manifest identity');
+      expect(readFileSync(join(target, 'foreign.txt'), 'utf8')).toBe('old');
+
+      writeFileSync(join(target, '.codex-plugin/plugin.json'), '{"name":"demo-plugin","version":"1.2.0+codex.20260920045433"}');
+      await codexWriter.add(incoming.plugin, incoming.resolved, { adoptExisting: true });
+      expect(existsSync(join(target, 'foreign.txt'))).toBe(false);
+      expect(readFileSync(join(target, 'resources/value.txt'), 'utf8')).toBe('new\n');
+      expect(JSON.parse(readFileSync(join(target, '.codex-plugin/plugin.json'), 'utf8')).version).toBe('1.2.0');
+    });
+  });
+
   test('refreshes a marker-matching slot if its active bytes were changed outside plgnz', async () => {
     await withHostEnvAsync('codex', async home => {
       const incoming = source({ 'resources/value.txt': 'expected\n' });

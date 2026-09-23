@@ -239,9 +239,24 @@ function validateCachedIdentity(target: string, expectedName: string, expectedVe
   const value: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`invalid cached Codex manifest: ${manifest}`);
   const record = value as Record<string, unknown>;
-  if (record['name'] !== expectedName || record['version'] !== expectedVersion) {
-    throw new Error(`cached Codex manifest identity does not match ${expectedName}@${expectedVersion}`);
+  if (record['name'] === expectedName && record['version'] === expectedVersion) return;
+  if (manifest === candidates[0] && record['name'] === expectedName && nativeBuildVariant(expectedVersion, record['version'])) {
+    const canonical = candidates.slice(1).find(existsSync);
+    if (canonical !== undefined) {
+      const canonicalValue: unknown = JSON.parse(readFileSync(canonical, 'utf8'));
+      if (typeof canonicalValue === 'object' && canonicalValue !== null && !Array.isArray(canonicalValue)) {
+        const identity = canonicalValue as Record<string, unknown>;
+        if (identity['name'] === expectedName && identity['version'] === expectedVersion) return;
+      }
+    }
   }
+  throw new Error(`cached Codex manifest identity does not match ${expectedName}@${expectedVersion}`);
+}
+
+function nativeBuildVariant(expected: string, actual: unknown): boolean {
+  if (typeof actual !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(expected)) return false;
+  const base = expected.split('+')[0]!;
+  return actual.startsWith(`${base}+`) && /^(?:[0-9A-Za-z-]+)(?:\.[0-9A-Za-z-]+)*$/u.test(actual.slice(base.length + 1));
 }
 
 /** Codex's native loader requires its own manifest path; project only safe, relevant fields. */
