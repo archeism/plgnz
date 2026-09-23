@@ -35,6 +35,55 @@ describe('dcode lifecycle', () => {
       expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toContain('second');
     });
   });
+  test('explicit adoption takes over one identity-matched native copy without deleting the prior cache', async () => {
+    await isolated(async root => {
+      const item = incoming(); item.resolved.sha = 'local';
+      writeFiles(copy(root), { 'plugin.json': '{"name":"addy","version":"0.1.0"}\n', 'skills/a/SKILL.md': 'legacy\n' });
+      writeFiles(root, {
+        '.state/installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'addy@personal': [{ installPath: copy(root), version: '0.1.0' }] } }),
+        '.state/plugin_state.json': JSON.stringify({ version: 1, enabledPlugins: { 'addy@personal': true } }),
+      });
+      expect((await failed(() => dcodeWriter.add(item.plugin, item.resolved))).message).toContain('not plgnz-owned');
+      await dcodeWriter.add(item.plugin, item.resolved, { dryRun: true, adoptExisting: true });
+      expect(dcode.listInstalled()[0]?.path).toBe(copy(root));
+      await dcodeWriter.add(item.plugin, item.resolved, { adoptExisting: true });
+      expect(dcode.listInstalled()[0]?.path).toBe(join(root, 'plugins/cache/personal/addy/local'));
+      expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe('legacy\n');
+      await dcodeWriter.remove('addy@personal');
+      expect(existsSync(copy(root))).toBe(true);
+    });
+  });
+  test('adoption refuses a mismatched legacy manifest and preserves native state', async () => {
+    await isolated(async root => {
+      const item = incoming(); item.resolved.sha = 'local';
+      writeFiles(copy(root), { 'plugin.json': '{"name":"other","version":"0.1.0"}\n' });
+      writeFiles(root, { '.state/installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'addy@personal': [{ installPath: copy(root), version: '0.1.0' }] } }) });
+      const before = readFileSync(registry(root), 'utf8');
+      expect((await failed(() => dcodeWriter.add(item.plugin, item.resolved, { adoptExisting: true }))).message).toContain('identity differs');
+      expect(readFileSync(registry(root), 'utf8')).toBe(before);
+      expect(existsSync(join(root, 'plugins/cache/personal/addy/local'))).toBe(false);
+    });
+  });
+  test('failed metadata commit during adoption restores the legacy native record', async () => {
+    await isolated(async root => {
+      const item = incoming(); item.resolved.sha = 'local';
+      writeFiles(copy(root), { 'plugin.json': '{"name":"addy","version":"0.1.0"}\n', 'skills/a/SKILL.md': 'legacy\n' });
+      writeFiles(root, {
+        '.state/installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'addy@personal': [{ installPath: copy(root), version: '0.1.0' }] } }),
+        '.state/plugin_state.json': JSON.stringify({ version: 1, enabledPlugins: { 'addy@personal': true } }),
+      });
+      const before = readFileSync(registry(root), 'utf8');
+      const now = Date.now;
+      Date.now = () => 12345;
+      mkdirSync(join(root, '.state', 'plugin_state.json.plgnz-12345'));
+      try { await failed(() => dcodeWriter.add(item.plugin, item.resolved, { adoptExisting: true })); }
+      finally { Date.now = now; }
+      expect(readFileSync(registry(root), 'utf8')).toBe(before);
+      expect(dcode.listInstalled()[0]?.path).toBe(copy(root));
+      expect(readFileSync(join(copy(root), 'skills/a/SKILL.md'), 'utf8')).toBe('legacy\n');
+      expect(existsSync(join(root, 'plugins/cache/personal/addy/local'))).toBe(false);
+    });
+  });
   test('copies ordinary skill bytes without normalizing line endings', async () => {
     await isolated(async root => {
       const raw = 'byte-preserved\r\n'; const item = incoming(raw); await dcodeWriter.add(item.plugin, item.resolved);

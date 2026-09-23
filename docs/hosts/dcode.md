@@ -18,6 +18,14 @@ same-version content change therefore refreshes the cache. Metadata failures
 roll the swap back; cleanup after metadata commit does not undo the active
 copy. Removal only handles marker-owned records.
 
+An explicit `add --adopt-existing` can take over one legacy native record
+when its ID, cache location, manifest name, and manifest version agree. The
+legacy cache remains in place during the transition; the registry points to
+the newly staged, marker-owned copy only after the metadata commit succeeds.
+If staging or metadata commit fails, the old record and cache remain active.
+Callers must verify the legacy copy's bytes against their expected source
+before requesting adoption. Ordinary adds do not take over unmarked records.
+
 dcode has native-loader evidence for ordinary plugin skills in
 `docs/evidence/dcode-native-loader-20260922.json` and a five-package public-CLI
 probe against deepagents-code 0.1.74 in

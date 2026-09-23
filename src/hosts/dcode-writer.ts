@@ -16,6 +16,7 @@ type Doc = Record<string, unknown>;
 
 export const dcodeWriter: HostWriter = {
   ...dcode,
+  supportsAdoption: true,
   async add(plugin: PluginSource, resolved: ResolvedSource, opts?: AddOptions): Promise<void | 'unchanged'> {
     const market = plugin.marketplace || 'local'; const id = `${plugin.name}@${market}`;
     assertIdentity(plugin.name, 'plugin'); assertIdentity(market, 'marketplace'); assertIdentity(resolved.sha, 'version');
@@ -26,10 +27,10 @@ export const dcodeWriter: HostWriter = {
     const registry = readRegistry(registryFile);
     const enablement = readEnablement(enablementFile);
     const plugins = object(registry.plugins, 'registry plugins'); const enabled = boolObject(enablement.enabledPlugins, 'enabledPlugins');
-    assertPriorRows(plugins[id], id, cache, resolved.sourceUri);
     const stage = mkdtempSync(join(tmpdir(), '.plgnz-dcode-stage-'));
     try {
-      stagePlugin(plugin.dir, stage, plugin.name);
+      const manifestVersion = stagePlugin(plugin.dir, stage, plugin.name);
+      assertPriorRows(plugins[id], id, cache, resolved.sourceUri, opts?.adoptExisting === true, plugin.name, manifestVersion);
       writeFileSync(join(stage, MARKER), JSON.stringify({ source: resolved.sourceUri, pluginId: id, fingerprint: plugin.contentFingerprint ?? '' } satisfies Ownership));
       const marker = ownership(target);
       if (marker !== null && (marker.source !== resolved.sourceUri || marker.pluginId !== id)) throw new Error(`dcode plugin ${id} belongs to another source; refusing to replace it`);
@@ -67,7 +68,7 @@ export const dcodeWriter: HostWriter = {
   },
 };
 
-function stagePlugin(source: string, stage: string, name: string): void {
+function stagePlugin(source: string, stage: string, name: string): string | undefined {
   assertNoSymlinks(source); cpSync(source, stage, { recursive: true }); assertNoSymlinks(stage);
   const manifest = [join(stage, 'plugin.json'), join(stage, '.claude-plugin', 'plugin.json'), join(stage, '.codex-plugin', 'plugin.json')].find(existsSync);
   if (!manifest) throw new Error('dcode stage has no supported plugin manifest');
@@ -99,6 +100,7 @@ function stagePlugin(source: string, stage: string, name: string): void {
       }
     }
   }
+  return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : undefined;
 }
 function requireDcodeCapability(capability: 'commandProjection' | 'userOnlySkills'): void {
   const profile = findConsumerProfile('dcode');
@@ -113,7 +115,26 @@ function readEnablement(file: string): Doc { const enablement = readDoc(file, { 
 function object(value: unknown, label: string): Doc { if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`invalid dcode ${label}`); return value as Doc; }
 function boolObject(value: unknown, label: string): Record<string, boolean> { const result = object(value, label); if (Object.values(result).some(value => typeof value !== 'boolean')) throw new Error(`invalid dcode ${label}`); return result as Record<string, boolean>; }
 function rowsFor(value: unknown): Doc[] { if (!Array.isArray(value)) return []; return value.filter((value): value is Doc => typeof value === 'object' && value !== null && !Array.isArray(value)); }
-function assertPriorRows(value: unknown, id: string, cache: string, source: string): void { for (const row of rowsFor(value)) { const install = typeof row.installPath === 'string' ? row.installPath : row.install_path; if (typeof install !== 'string') throw new Error(`dcode install record ${id} has no installPath`); assertUnder(cache, install); assertManagedPath(install); const marker = ownership(install); if (marker?.pluginId !== id || marker.source !== source) throw new Error(`dcode install record ${id} is not plgnz-owned; refusing to replace it`); } }
+function assertPriorRows(value: unknown, id: string, cache: string, source: string, adopt: boolean, name: string, version: string | undefined): void {
+  const rows = rowsFor(value);
+  for (const row of rows) {
+    const install = typeof row.installPath === 'string' ? row.installPath : row.install_path;
+    if (typeof install !== 'string') throw new Error(`dcode install record ${id} has no installPath`);
+    assertUnder(cache, install); assertManagedPath(install);
+    const marker = ownership(install);
+    if (marker?.pluginId === id && marker.source === source) continue;
+    if (marker !== null || !adopt || rows.length !== 1 || !existsSync(install) || version === undefined || typeof row.version !== 'string' || row.version !== version || resolve(install) !== resolve(join(cache, version))) {
+      throw new Error(`dcode install record ${id} is not plgnz-owned; refusing to replace it`);
+    }
+    assertNoSymlinks(install);
+    const manifest = [join(install, 'plugin.json'), join(install, '.claude-plugin', 'plugin.json'), join(install, '.codex-plugin', 'plugin.json')].find(existsSync);
+    if (!manifest) throw new Error(`dcode legacy install ${id} has no supported manifest; refusing adoption`);
+    let legacy: Doc;
+    try { legacy = object(JSON.parse(readFileSync(manifest, 'utf8')) as unknown, 'legacy manifest'); }
+    catch { throw new Error(`dcode legacy install ${id} has invalid manifest; refusing adoption`); }
+    if (legacy.name !== name || legacy.version !== version) throw new Error(`dcode legacy install ${id} identity differs; refusing adoption`);
+  }
+}
 function ownership(dir: string): Ownership | null { assertManagedPath(dir); const file = join(dir, MARKER); assertManagedPath(file); if (!existsSync(file)) return null; try { const value = JSON.parse(readFileSync(file, 'utf8')) as Doc; if (typeof value.source !== 'string' || typeof value.pluginId !== 'string' || typeof value.fingerprint !== 'string') throw new Error('marker fields are invalid'); return value as Ownership; } catch (error) { throw new Error(`invalid dcode ownership marker: ${file} (${(error as Error).message})`); } }
 function writeDoc(file: string, value: Doc): void { mkdirSync(dirname(file), { recursive: true }); const temporary = `${file}.plgnz-${Date.now()}`; try { writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`); renameSync(temporary, file); } finally { rmSync(temporary, { force: true }); } }
 function snapshot(file: string): Uint8Array | undefined { const read = readFileSync as unknown as (path: string) => Uint8Array; return existsSync(file) ? read(file) : undefined; }

@@ -64,11 +64,12 @@ Skill counts were 8, 2, 22, 7, and 2, with names such as
 The native roots matched public list paths. No plugin command or agent surface
 was claimed.
 
-A public add of **all seven** selected packages failed visibly at
+At this earlier checkpoint, a public add of **all seven** selected packages failed visibly at
 `mattpocock` with `unsupported for userOnlySkills`. Earlier package installs
 remained content healthy; public list and doctor exposed the pending install
-intent. This blocks Personal's all-selected cutover. The existing Personal
-installer was not edited or removed, and no delivery allowlist was changed.
+intent. Personal's subsequent regular-only cutover delivers the five ordinary
+packages and reports the two restricted packages as deferred, without changing
+the delivery allowlist or stripping their invocation metadata.
 
 Focused regression: `bun test test/dcode-lifecycle.test.ts` passed 13 tests,
 including a Codex-sidecar-only refusal that preserves the active copy and
