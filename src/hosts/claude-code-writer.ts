@@ -1,6 +1,6 @@
 /** Claude Code's native cache/registry writer. Kept separate from the read-only reader. */
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AddOptions, HostWriter, InstalledPlugin, PinOptions, PinOutcome } from '../host';
 import type { PluginSource, ResolvedSource } from '../source';
@@ -23,10 +23,11 @@ export const claudeCodeWriter: HostWriter = {
     const registryFile = join(pluginsDir(), 'installed_plugins.json');
     const settingsFile = join(pluginsDir(), '..', 'settings.json');
     const marketplacesFile = join(pluginsDir(), 'known_marketplaces.json');
+    const wrapper = !existsSync(join(resolved.sourceUri, '.claude-plugin', 'marketplace.json')) ? join(pluginsDir(), 'marketplaces', `.plgnz-${marketplace}`) : undefined;
+    for (const path of [slot, registryFile, settingsFile, marketplacesFile]) assertManagedPath(path);
     const registry = readRegistry(registryFile);
     const settings = readSettings(settingsFile);
     const marketplaces = readMarketplaces(marketplacesFile);
-    assertManagedCache(slot);
     const alreadyOwned = hasAdoptedRegistryInstall(registry, id, resolved.sourceUri, slot);
     const legacy = opts?.adoptExisting && !alreadyOwned ? validateLegacyUserInstall(registry, id, slot, plugin) : undefined;
     const owned = ownedRegistryTarget(registry, id, resolved.sourceUri, slot, version);
@@ -35,9 +36,12 @@ export const claudeCodeWriter: HostWriter = {
       (legacy !== undefined && existsSync(join(slot, version)) && readOwnership(join(slot, version)) === null
         ? join(slot, `${version}.plgnz`)
         : join(slot, version));
+    assertManagedPath(target);
+    if (existsSync(target)) assertNoSymlinks(target);
     const existing = readOwnership(target);
     assertTargetIsReplaceable(target, existing, id, resolved.sourceUri);
     assertNoForeignRegistryEntry(registry, id, target, resolved.sourceUri, legacy);
+    if (!preserveNativeMarketplace && wrapper !== undefined) assertManagedPath(wrapper);
     if (!preserveNativeMarketplace) validateMarketplaceRegistration(marketplaces, marketplace, resolved.sourceUri, plugin);
     if (opts?.dryRun) {
       const stage = mkdtempSync(join(tmpdir(), 'plgnz-claude-dry-run-'));
@@ -48,10 +52,10 @@ export const claudeCodeWriter: HostWriter = {
       return;
     }
     mkdirSync(slot, { recursive: true });
-    assertManagedCache(slot);
+    assertManagedPath(slot);
     const stage = mkdtempSync(join(slot, '.plgnz-stage-'));
-    const wrapper = !preserveNativeMarketplace && !existsSync(join(resolved.sourceUri, '.claude-plugin', 'marketplace.json')) ? join(pluginsDir(), 'marketplaces', `.plgnz-${marketplace}`) : undefined;
-    const wrapperSnapshot = wrapper === undefined ? undefined : snapshotDirectory(wrapper);
+    const ownedWrapper = preserveNativeMarketplace ? undefined : wrapper;
+    const wrapperSnapshot = ownedWrapper === undefined ? undefined : snapshotDirectory(ownedWrapper);
     let durable = false;
     try {
       stagePlugin(plugin.dir, stage, plugin.name, version);
@@ -89,7 +93,7 @@ export const claudeCodeWriter: HostWriter = {
     } catch (error) {
       // Once metadata points at the new cache, cleanup errors must preserve the
       // durable activation rather than resurrecting its old wrapper.
-      if (!durable) restoreDirectory(wrapper, wrapperSnapshot);
+      if (!durable) restoreDirectory(ownedWrapper, wrapperSnapshot);
       rmSync(stage, { recursive: true, force: true });
       throw error;
     }
@@ -105,6 +109,7 @@ export const claudeCodeWriter: HostWriter = {
   async remove(id: string): Promise<void> {
     const registryFile = join(pluginsDir(), 'installed_plugins.json');
     const settingsFile = join(pluginsDir(), '..', 'settings.json');
+    for (const path of [registryFile, settingsFile]) assertManagedPath(path);
     const settings = readSettings(settingsFile);
     if (!existsSync(registryFile)) {
       const enabled = settings['enabledPlugins'];
@@ -357,8 +362,10 @@ function writeMarketplaces(file: string, marketplaces: Record<string, unknown>):
 }
 
 function writeJsonAtomically(file: string, value: unknown): void {
+  assertManagedPath(file);
   mkdirSync(dirname(file), { recursive: true });
   const temp = `${file}.plgnz-${Date.now()}`;
+  assertManagedPath(temp);
   try { writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`); renameSync(temp, file); }
   finally { rmSync(temp, { force: true }); }
 }
@@ -421,10 +428,21 @@ function assertTargetIsReplaceable(target: string, ownership: Ownership | null, 
   if (ownership !== null && (ownership.pluginId !== id || ownership.source !== source)) throw new Error(`claude-code cache slot ${target} has a different owned source identity; refusing to replace it`);
 }
 
-function assertManagedCache(slot: string): void {
-  const root = pluginsDir();
-  if (existsSync(root)) assertNoSymlinks(root);
-  if (existsSync(slot)) assertNoSymlinks(slot);
+/** Check only path components this operation will read or write, including dangling links. */
+function assertManagedPath(path: string): void {
+  const root = resolve(join(pluginsDir(), '..'));
+  const target = resolve(path);
+  const suffix = relative(root, target);
+  if (suffix === '..' || suffix.startsWith('../') || suffix.startsWith('..\\')) throw new Error(`Claude Code managed path escapes its root: ${path}`);
+  let current = root;
+  for (const part of ['', ...suffix.split('/').filter(Boolean)]) {
+    if (part !== '') current = join(current, part);
+    let stat: ReturnType<typeof lstatSync>;
+    try { stat = lstatSync(current); }
+    catch (error) { if ((error as { code?: string }).code === 'ENOENT') return; throw error; }
+    if (stat.isSymbolicLink()) throw new Error(`Claude Code managed path component is a symlink: ${current}`);
+    if (current !== target && !stat.isDirectory()) throw new Error(`Claude Code managed path component is not a directory: ${current}`);
+  }
 }
 
 function cleanupPriorOwnedPaths(registry: Registry, id: string, active: string, source: string): void {
@@ -479,5 +497,6 @@ function bytesKey(path: string): string {
 }
 
 function assertNoSymlinks(dir: string): void {
+  if (lstatSync(dir).isSymbolicLink()) throw new Error(`Claude Code cache contains symlink: ${dir}`);
   for (const entry of readdirSync(dir)) { const path = join(dir, entry); const stat = lstatSync(path); if (stat.isSymbolicLink()) throw new Error(`Claude Code cache contains symlink: ${path}`); if (stat.isDirectory()) assertNoSymlinks(path); }
 }

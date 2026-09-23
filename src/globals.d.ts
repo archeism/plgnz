@@ -26,12 +26,14 @@ declare module 'node:fs' {
   export function chmodSync(path: string, mode: number): void;
   export function mkdtempSync(prefix: string): string;
   export function renameSync(oldPath: string, newPath: string): void;
+  export function symlinkSync(target: string, path: string): void;
   export const constants: { X_OK: number };
 }
 
 declare module 'node:path' {
   export function join(...parts: string[]): string;
   export function resolve(...parts: string[]): string;
+  export function relative(from: string, to: string): string;
   export function dirname(p: string): string;
   export function basename(p: string, ext?: string): string;
   export function isAbsolute(p: string): boolean;

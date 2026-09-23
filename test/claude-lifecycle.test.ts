@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { claudeCode } from '../src/hosts/claude-code';
@@ -58,6 +58,79 @@ async function failure(run: () => Promise<unknown>): Promise<Error> {
 }
 
 describe('claude-code lifecycle', () => {
+  test('installs beside a valid symlink in an unrelated native marketplace', async () => {
+    await isolated(async root => {
+      const incoming = fixture({});
+      const external = mkdtempSync(join(tmpdir(), 'plgnz-claude-foreign-'));
+      try {
+        const foreign = join(root, 'plugins/marketplaces/other/CLAUDE.md');
+        mkdirSync(join(root, 'plugins/marketplaces/other'), { recursive: true });
+        writeFileSync(join(external, 'AGENTS.md'), 'keep\n');
+        symlinkSync(join(external, 'AGENTS.md'), foreign);
+        await claudeCodeWriter.add(incoming.plugin, incoming.resolved);
+        expect(lstatSync(foreign).isSymbolicLink()).toBe(true);
+        expect(readFileSync(foreign, 'utf8')).toBe('keep\n');
+        expect(existsSync(join(root, 'plugins/cache/personal/addy/0.1.0/.plgnz-install.json'))).toBe(true);
+      } finally { rmSync(external, { recursive: true, force: true }); }
+    });
+  });
+
+  test('refuses a selected cache symlink before changing its external target', async () => {
+    await isolated(async root => {
+      const incoming = fixture({});
+      const external = mkdtempSync(join(tmpdir(), 'plgnz-claude-redirect-'));
+      try {
+        writeFileSync(join(external, 'sentinel.txt'), 'keep\n');
+        mkdirSync(join(root, 'plugins/cache/personal'), { recursive: true });
+        symlinkSync(external, join(root, 'plugins/cache/personal/addy'));
+        expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved))).message).toContain('symlink');
+        expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep\n');
+        expect(readdirSync(external)).toEqual(['sentinel.txt']);
+      } finally { rmSync(external, { recursive: true, force: true }); }
+    });
+  });
+
+  test('refuses dangling cache links and redirected Claude roots before writes', async () => {
+    await isolated(async root => {
+      const incoming = fixture({});
+      const slot = join(root, 'plugins/cache/personal/addy');
+      mkdirSync(join(root, 'plugins/cache/personal'), { recursive: true });
+      symlinkSync(join(root, 'missing-external'), slot);
+      expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved))).message).toContain('symlink');
+      expect(lstatSync(slot).isSymbolicLink()).toBe(true);
+      rmSync(slot);
+
+      const alias = join(root, 'claude-alias');
+      symlinkSync(root, alias);
+      process.env['OPEN_PLUGIN_CLAUDE_CODE_ROOT'] = alias;
+      expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved))).message).toContain('symlink');
+      process.env['OPEN_PLUGIN_CLAUDE_CODE_ROOT'] = root;
+      expect(existsSync(join(root, 'plugins/installed_plugins.json'))).toBe(false);
+    });
+  });
+
+  test('refuses symlinked metadata and selected wrapper before changing external files', async () => {
+    await isolated(async root => {
+      const incoming = rootFixture({});
+      const external = mkdtempSync(join(tmpdir(), 'plgnz-claude-metadata-'));
+      try {
+        const metadata = join(root, 'plugins/installed_plugins.json');
+        const sentinel = join(external, 'registry.json');
+        writeFileSync(sentinel, '{"version":2,"plugins":{}}');
+        mkdirSync(join(root, 'plugins'), { recursive: true });
+        symlinkSync(sentinel, metadata);
+        expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved))).message).toContain('symlink');
+        expect(readFileSync(sentinel, 'utf8')).toBe('{"version":2,"plugins":{}}');
+        rmSync(metadata);
+
+        const wrapper = join(root, 'plugins/marketplaces/.plgnz-local');
+        mkdirSync(join(root, 'plugins/marketplaces'), { recursive: true });
+        symlinkSync(external, wrapper);
+        expect((await failure(() => claudeCodeWriter.add(incoming.plugin, incoming.resolved))).message).toContain('symlink');
+        expect(readdirSync(external)).toEqual(['registry.json']);
+      } finally { rmSync(external, { recursive: true, force: true }); }
+    });
+  });
   test('reports native user enablement rather than treating installation as activation', async () => {
     await isolated(async root => {
       const incoming = fixture({});
