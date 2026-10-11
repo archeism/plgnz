@@ -73,7 +73,7 @@ export type LifecycleRouteRecord =
   | { kind: 'managed' | 'native'; evidenceKey: CapabilityEvidenceReferenceRecord };
 
 export type OwnershipProofRecord =
-  | { kind: 'legacy-claim' }
+  | { kind: 'legacy-claim'; prior?: 'plgnz' | 'unrecorded' | 'unproven' }
   | { kind: 'created'; proofKey: OwnershipProofReferenceRecord; verifiedAt: string }
   | { kind: 'adopted'; proofKey: OwnershipProofReferenceRecord; verifiedAt: string; adoptedAt: string };
 
@@ -559,7 +559,8 @@ function validateRoute(value: unknown, label: string): LifecycleRouteRecord {
 function validateOwnership(value: unknown, label: string): OwnershipProofRecord {
   const rec = asObject(value, label);
   const kind = oneOf(rec['kind'], ['legacy-claim', 'created', 'adopted'], `${label}.kind`);
-  exactFields(rec, kind === 'legacy-claim' ? ['kind'] : kind === 'created' ? ['kind', 'proofKey', 'verifiedAt'] : ['kind', 'proofKey', 'verifiedAt', 'adoptedAt'], 'ownership proof');
+  exactFields(rec, kind === 'legacy-claim' ? ['kind', 'prior'] : kind === 'created' ? ['kind', 'proofKey', 'verifiedAt'] : ['kind', 'proofKey', 'verifiedAt', 'adoptedAt'], 'ownership proof');
+  if (kind === 'legacy-claim' && rec['prior'] !== undefined) oneOf(rec['prior'], ['plgnz', 'unrecorded', 'unproven'], `${label}.prior`);
   if (kind !== 'legacy-claim') {
     validateOwnershipProofReference(rec['proofKey'], `${label}.proofKey`);
     timestamp(rec['verifiedAt'], `${label}.verifiedAt`);
@@ -704,7 +705,7 @@ function commandAllowsJournalAction(command: LifecycleAttemptRecord['command'], 
         || action === 'retain-prior'
         || action === 'disable-nonconforming';
     case 'remove':
-      return action === 'remove';
+      return action === 'remove' || action === 'retire-orphan';
     case 'legacy-recovery':
       return true;
   }
