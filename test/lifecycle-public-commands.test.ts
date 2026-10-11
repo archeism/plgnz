@@ -2108,6 +2108,63 @@ describe('public lifecycle commands', () => {
     });
   });
 
+  test('add --target dcode after a planner install records a plgnz legacy claim and remove leaves the planner install', async () => {
+    await withLifecycleCliHarness((harness) => {
+      harness.writeHome({ '.cursor/.keep': '', '.deepagents/.keep': '' });
+      const source = harness.source('dcode-legacy-claim', {
+        'plugin.json': '{"name":"demo","version":"1.0.0","description":"from planner"}\n',
+        'skills/demo/SKILL.md': '---\nname: demo\ndescription: demo\n---\n\nDemo.\n',
+      });
+      const cursor = harness.fakeNative('cursor', versionSteps(24));
+      const dcode = harness.fakeNative('dcode', Array.from({ length: 8 }, () => ({
+        args: ['--version'],
+        stdout: 'deepagents-code 0.1.83\n',
+      })));
+      const env = { OPEN_PLUGIN_CURSOR_BIN: cursor.path, OPEN_PLUGIN_DCODE_BIN: dcode.path };
+      const planned = harness.run(['add', source, '--target', 'cursor', '--json'], { env });
+      expect(planned.exitCode).toBe(0);
+
+      const added = harness.run(['add', source, '--target', 'dcode', '--json'], { env });
+      const ledger = JSON.parse(bytesToText(added.state.after ?? [])) as {
+        scopes?: Array<{ id?: string; target?: { kind?: string } }>;
+        activations?: Array<{ scopeId?: string; packageId?: string; ownership?: { kind?: string; prior?: string } }>;
+      };
+      const dcodeScope = ledger.scopes?.find((scope) => scope.target?.kind === 'dcode');
+      const claim = ledger.activations?.find((row) => row.scopeId === dcodeScope?.id);
+      expect({
+        exitCode: added.exitCode,
+        stderr: added.stderr,
+        ownership: claim?.ownership ?? null,
+      }).toEqual({
+        exitCode: 0,
+        stderr: '',
+        ownership: { kind: 'legacy-claim', prior: 'plgnz' },
+      });
+
+      const removed = harness.run(['remove', 'demo@local', '--target', 'dcode', '--json'], { env });
+      const after = JSON.parse(bytesToText(removed.state.after ?? [])) as {
+        scopes?: Array<{ id?: string; target?: { kind?: string } }>;
+        activations?: Array<{ scopeId?: string; packageId?: string }>;
+      };
+      const cursorScope = after.scopes?.find((scope) => scope.target?.kind === 'cursor');
+      const cursorKept = after.activations?.some((row) => row.packageId === 'demo' && row.scopeId === cursorScope?.id) ?? false;
+      const dcodeStillThere = after.activations?.some((row) => row.scopeId === dcodeScope?.id) ?? false;
+      expect({
+        exitCode: removed.exitCode,
+        stderr: removed.stderr,
+        cursorKept,
+        dcodeStillThere,
+        installed: bytesToText(removed.stores.cursor.after.files['plugins/local/demo/plugin.json'] ?? []),
+      }).toEqual({
+        exitCode: 0,
+        stderr: '',
+        cursorKept: true,
+        dcodeStillThere: false,
+        installed: '{"name":"demo","version":"1.0.0","description":"from planner"}\n',
+      });
+    });
+  });
+
   test('an explicit empty or missing cursor binary refuses and does not claim the directory profile', async () => {
     await withLifecycleCliHarness((harness) => {
       harness.writeHome({ '.cursor/.keep': '' });

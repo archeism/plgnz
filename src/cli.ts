@@ -300,14 +300,21 @@ function withoutRetiredActivation(
   nativeId: string,
   retiredAt: string,
 ): LifecycleStateV2 {
-  const activation = state.activations.find((row) => row.scopeId === scopeId && row.packageId === packageId && row.nativeId === nativeId);
+  const activation = state.activations.find((row) =>
+    row.scopeId === scopeId && row.nativeId === nativeId && (row.packageId === packageId || row.packageId === nativeId));
   if (activation === undefined) throw new Error(`activation '${packageId}' is not recorded for manual removal`);
+  const dropped = state.activations.filter((row) => row !== activation);
   const tombstone = retirementTombstone(activation, retiredAt);
-  if (tombstone === null) throw new Error(`activation '${packageId}' cannot retain a tombstone`);
+  if (tombstone === null) {
+    if (activation.ownership.kind === 'legacy-claim' && activation.route.kind === 'legacy-unverified' && (activation.ownership.prior === 'plgnz' || activation.ownership.prior === 'unrecorded')) {
+      return { ...state, stateGeneration: state.stateGeneration + 1, activations: dropped };
+    }
+    throw new Error(`activation '${packageId}' cannot retain a tombstone`);
+  }
   return {
     ...state,
     stateGeneration: state.stateGeneration + 1,
-    activations: state.activations.filter((row) => row.scopeId !== scopeId || row.packageId !== packageId || row.nativeId !== nativeId),
+    activations: dropped,
     tombstones: state.tombstones.some((row) => row.id === tombstone.id) ? state.tombstones : [...state.tombstones, tombstone],
   };
 }
@@ -1548,7 +1555,12 @@ export async function main(argv: string[]): Promise<number> {
         );
         break;
       }
-      if (record.ownership !== 'plgnz' && record.ownership !== undefined) {
+      const claimed = lifecycleState.activations.find((row) =>
+        row.scopeId === selected.scope.id && row.nativeId === identity.nativeId && (row.packageId === identity.package || row.packageId === record.id));
+      const legacyRemoval = claimed?.ownership.kind === 'legacy-claim'
+        && claimed.route.kind === 'legacy-unverified'
+        && (claimed.ownership.prior === 'plgnz' || claimed.ownership.prior === 'unrecorded');
+      if (record.ownership !== 'plgnz' && record.ownership !== undefined && !legacyRemoval) {
         preflightFailure = reason('internal', 'internal.ambiguous-ownership', 'install ownership is not proven; refusing removal');
         break;
       }

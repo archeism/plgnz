@@ -55,7 +55,7 @@ export function withLegacyWriterRecord(state: LifecycleStateV2, record: InstallR
     ...(relativeDir === undefined ? {} : { sourceRelativeDir: relativeDir }),
     sourceRevision: record.sourceSha,
     route: { kind: 'legacy-unverified' },
-    ownership: { kind: 'legacy-claim' },
+    ownership: { kind: 'legacy-claim', prior: legacyClaimPrior(record.ownership) },
     fingerprints: {
       ...(record.fingerprint === undefined ? {} : { source: record.fingerprint }),
       ...(record.installedFingerprint === undefined ? {} : { installed: record.installedFingerprint }),
@@ -108,6 +108,12 @@ export function writeLifecycleState(
     throw new Error(`stateGeneration must advance from ${previous.state.stateGeneration} to ${expectedGeneration}`);
   }
   atomicWrite(file, JSON.stringify(state, null, 2));
+}
+
+function legacyClaimPrior(ownership: string | undefined): 'plgnz' | 'unrecorded' | 'unproven' {
+  if (ownership === undefined) return 'unrecorded';
+  if (ownership === 'plgnz') return 'plgnz';
+  return 'unproven';
 }
 
 function persistedSource(binding: SourceBinding): SourceBinding {
